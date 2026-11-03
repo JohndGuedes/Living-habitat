@@ -81,7 +81,8 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
   - `take_manual()` pausa por `MANUAL_PAUSE`; `poke()` responde ao clique.
   - Subclasses:
     - `HornetBrain`: falas próprias ("Shaw!", "Garama!"...), sem fome; senta, costura, olha em volta,
-      treina e se move saltando. `force()` faz ela levantar antes se estiver sentada.
+      treina, pula e toca a agulha como instrumento (`t_needolin`, mais à tarde e à noite).
+      `force()` faz ela levantar antes se estiver sentada.
     - `GrubBrain`: sem fome nem sede; `lonely` sobe quando ninguém está perto (até 160 px), e com
       isso ele chora. Também fica feliz e viaja por `burrow_to`.
   - Comum a todos:
@@ -89,6 +90,10 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     - `force(nome, gerador)` troca a tarefa.
     - `free_point()` escolhe destinos longe dos outros.
     - `DRINK_ANIMS` define como cada um bebe.
+    - `listen_to(musician)`/`t_listen`: quando a Hornet começa a tocar, quem estiver livre às vezes
+      vem ouvir, fica virado para ela e aplaude no fim (o Grub fica feliz).
+    - `walk_to` corre (`character.running`) quando o caminho passa de `RUN_DIST` e o personagem tem a
+      animação `run`. No último passo o vetor é encurtado para não passar do ponto.
 - **Banco** (`Brain.t_bench`, `sit_on`/`leave_bench`): Knight e Hornet vão a um assento livre
   (`Bench.free_seat`, com o assento reservado ao sair) e sentam com a animação `bench_sit`, desenhados
   `seat_lift = bench.seat_height - seat_drop` acima. São mais frequentes à tarde e à noite
@@ -115,12 +120,13 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     vezes vão os dois. Com os dois sentados, roda `BENCH_SCRIPTS` (ou `BENCH_NIGHT_SCRIPTS`), com
     `BENCH_COOLDOWN` entre as conversas.
 - `character.py`: `locomotion` vem do sprite_def:
-  - `walk`: anda normalmente.
-  - `leap`: com vetor de movimento, toca `takeoff → leap → land` e só avança no ar (Hornet).
+  - `walk`: anda normalmente; com `running` e a animação `run`, corre a `run_speed`.
+  - `leap`: com vetor de movimento, toca `takeoff → leap → land` e só avança no ar (não usado agora).
   - `burrow`: não anda; a rotina enterra e faz brotar em outro lugar (Grub).
 
   `Character` tem `x`/`y` (os **pés**), `dir`, `facing` e `state`. O `state` é o nome
-  da animação: idle, walk, lie_down, sleep, wake, eat ou jump.
+  da animação: idle, walk, run, lie_down, sleep, wake, eat ou jump. Um vetor menor que 1 dá um passo
+  mais curto.
   - `update(dt, axis, world)` recebe um vetor de movimento (float), vindo do teclado (`read_axis`) ou
     da rotina.
   - `do_action(nome)`, `toggle_sleep()` e `say(texto)` (balão de fala; `draw_speech` desenha por cima
@@ -238,27 +244,42 @@ Não há vista de frente nem de costas (o jogo é de plataforma).
 
 - É uma mistura de frames soltos (prefixo + número) com atlas compactados do jogo (sem ordem e com
   quadros girados).
-- O sprite_def usa `"files": prefixo` e `"pick"`. Não existe andar, por isso a locomoção é `leap`.
-- Os quadros "no ar" vêm do atlas de pulo, extraídos por `tools/extract_hornet.py` (índices em `PICKS`)
-  para `frames/air/`.
+- Movimentos (idle, walk, run, pulo) vêm de `Hornet main sprites - atlas2 #34870.png`, e o tocar
+  (`needolin`) de `Hornet needolin - atlas0 #34857.png`. Os dois são extraídos por
+  `tools/extract_atlas.py` (veja abaixo) para `frames/{idle,walk,run,jump_up,crouch,needolin}` com os
+  pés no centro da imagem (`"pivot": "center"`).
+- O resto usa frames soltos: `"files": prefixo` e `"pick"`.
 - `align: "per_anim"`: cada sequência tem um tamanho de tela diferente. `sit`/`sew` (cena da tecelã)
   usam `"scale": 1.3`.
-- **Lado da arte:** `idle`/`look` (peak_needolin_look) olham para a DIREITA; as outras para a esquerda
-  (`art_faces` por animação).
+- **Lado da arte** (`art_faces` por animação): `idle`, `walk`, `needolin` e `look` olham para a
+  DIREITA; `run`, `jump` e as outras, para a esquerda. Os chifres curvam para trás, então o lado é o
+  dos olhos.
 
 | Animação | Origem |
 |---|---|
-| idle, look | peak_needolin_look |
-| takeoff, land, eat | hornet_heart_grab_land |
+| idle, walk, run | atlas2 #34870 (`frames/idle`, `walk`, `run`) |
+| jump | `crouch` → `jump_up` → `crouch` (pulo em arco pelo código, `hop`) |
+| needolin | atlas0 #34857 (`frames/needolin`) |
+| look | peak_needolin_look |
+| eat | hornet_heart_grab_land |
 | sit, sew, stand_up | weaver_hornet_* |
 | lie_down, sleep, wake | summit_hornet |
 | attack | Beast_Slash_Hornet |
 
 - `bench_sit` (sentada no banco) usa `frames/bench_sit`, os quadros 17 e 18 do atlas "Hornet
   sitting", com `scale: 0.75` e `art_faces: None` (pose de frente).
-- `tools/extract_atlas.py` (que substituiu extract_hornet.py) extrai quadros de atlas compactados por
-  índice: `EXTRACTS`, com a numeração nas faixas `band`. Gera `Hornet/frames/air`,
-  `Hornet/frames/bench_sit` e `Shade/frames/idle`.
+- `tools/extract_atlas.py` extrai quadros de atlas compactados por índice: `EXTRACTS`, com a numeração
+  nas faixas `band`. As opções da entrada:
+  - `"unrotate"` desvira os quadros guardados deitados, detectados quando a cabeça branca fica à
+    direita do vestido.
+  - `"pivot"` salva em telas iguais com os pés no centro. `register` alinha cada quadro ao anterior
+    pela maior sobreposição; `each` acha os pés de cada quadro.
+  - As listas de índices já estão na ordem da animação. A ordem original se perde no atlas; ela foi
+    achada por semelhança entre os quadros (a volta mais curta).
+  - Gera as pastas da Hornet, `Hornet/frames/bench_sit` e `Shade/frames/idle`.
+  - Ficaram de fora do atlas principal, entre outras: a pose de frente com a agulha na horizontal, o
+    dash e os ataques. Também ficou de fora a variação do needolin com a cabeça para trás (mistura duas
+    sequências).
 
 ### Sombra (`character/Shade/frames/idle`)
 
@@ -278,7 +299,7 @@ para a esquerda. O sprite_def é `"shade"`.
 ### Carregador (`assets._load_frame_folders`)
 
 - Opções por animação: `dir` ou `files`, `start`/`end`, `reverse`, `pick`, e em `per_anim` também
-  `foot`, `shift_x` e `scale`.
+  `foot`, `shift_x`, `scale` e `pivot` (`"center"` = pés no centro de cada imagem).
 - `align: "union"` (o Knight) recorta tudo pelo mesmo retângulo.
 - As outras pastas em `character/` (`NPCs`, `Tecela`, `charmander`, `froakie`) existem, mas não são usadas.
 

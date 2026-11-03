@@ -61,29 +61,35 @@ CHARACTER_SPRITES = {
     },
     "hornet": {
         # Frames soltos em assets/sprites/character/Hornet/ (prefixo + número) e
-        # quadros "no ar" tirados do atlas por tools/extract_hornet.py.
-        # Não há animação de andar: ela se move SALTANDO (locomotion "leap").
+        # pastas frames/* tiradas dos atlas por tools/extract_atlas.py:
+        #   "Hornet main sprites - atlas2" -> idle, walk, run, jump_up, crouch
+        #   "Hornet needolin - atlas0"     -> needolin (tocando a agulha)
+        # Essas pastas são salvas com os pés no centro da imagem ("pivot": "center").
         "frames_root": "character/Hornet",
         "align": "per_anim",
         "scale": 0.6,
         "art_faces": "left",
-        "speed": 340,              # velocidade durante o salto
-        "locomotion": "leap",
+        "speed": 150,              # andando
+        "run_speed": 330,          # correndo (trajetos longos)
         "shadow": (40, 9),
         "seat_drop": 22,
         "animations": {
-            # (estas duas olham para a DIREITA na arte; as outras para a esquerda)
-            "idle":      {"files": "peak_needolin_look", "pick": [0], "frame_duration": 1.0,
+            # (idle, walk e needolin olham para a DIREITA na arte; run/jump para a esquerda)
+            "idle":      {"dir": "frames/idle", "pivot": "center", "frame_duration": 0.09,
+                          "art_faces": "right"},
+            "walk":      {"dir": "frames/walk", "pivot": "center", "frame_duration": 0.085,
+                          "art_faces": "right"},
+            "run":       {"dir": "frames/run", "pivot": "center", "frame_duration": 0.045},
+            # pulo: agacha -> sobe (arco desenhado pelo código) -> agacha ao pousar
+            # (lista = crouch 0-7, jump_up 8-18, crouch 19-26)
+            "jump":      {"dir": ["frames/crouch", "frames/jump_up", "frames/crouch"],
+                          "pivot": "center", "loop": False, "frame_duration": 0.05, "hop": 75,
+                          "pick": [3, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 24, 22, 20]},
+            # tocando a agulha como instrumento
+            "needolin":  {"dir": "frames/needolin", "pivot": "center", "frame_duration": 0.1,
                           "art_faces": "right"},
             "look":      {"files": "peak_needolin_look", "frame_duration": 0.11, "loop": False,
                           "art_faces": "right"},
-            # salto: agacha -> no ar (arco) -> aterrissa
-            "takeoff":   {"files": "hornet_heart_grab_land", "pick": [13, 11, 9, 7],
-                          "frame_duration": 0.035, "loop": False, "next": "leap"},
-            "leap":      {"dir": "frames/air", "pick": [0, 0, 1, 1, 1], "frame_duration": 0.07,
-                          "loop": False, "next": "land", "hop": 55},
-            "land":      {"files": "hornet_heart_grab_land", "pick": [4, 6, 8, 10, 12, 13],
-                          "frame_duration": 0.045, "loop": False},
             # sentar e costurar
             # (desenhadas menores na origem: "scale" compensa)
             "sit":       {"files": "weaver_hornet_idle", "frame_duration": 0.16, "scale": 1.3},

@@ -140,7 +140,7 @@ class Decor:
 
     def update(self, dt: float, wind: float = 1.0, actors=()):
         for a in actors:
-            if abs(a.x - self.x) < 34 and abs(a.y - self.y) < 16 and getattr(a, "state", "") in ("walk", "land"):
+            if abs(a.x - self.x) < 34 and abs(a.y - self.y) < 16 and getattr(a, "state", "") in ("walk", "run", "land"):
                 self.rustle = 0.7
         self.rustle = max(0.0, self.rustle - dt)
         self.wind = wind

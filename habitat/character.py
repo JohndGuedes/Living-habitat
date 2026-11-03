@@ -24,11 +24,15 @@ class Character:
         self.speed = speed    # pixels de jogo por segundo
         self.dir = "down"
         self.facing = "right"  # último lado horizontal (para sprites de vista lateral)
-        self.state = "idle"    # nome da animação: idle, walk, lie_down, sleep, wake, eat, jump
+        self.state = "idle"    # nome da animação: idle, walk, run, lie_down, sleep, wake, eat, jump
         self.sheets = load_sprite_set(sprite_def)
         # Como se move: "walk" (anda), "leap" (salta: takeoff -> leap -> land)
         # ou "burrow" (não anda; a rotina o faz viajar por baixo da terra)
         self.locomotion = sprite_def.get("locomotion", "walk")
+        # Correr: a rotina liga `running` em trajetos longos; só vale se houver
+        # a animação "run" (usa `run_speed` em vez de `speed`)
+        self.running = False
+        self.run_speed = sprite_def.get("run_speed", speed * 1.8)
         self.brain = None          # a rotina, se houver (ligada pelo Game)
         self.seat_drop = sprite_def.get("seat_drop", 0)
         self.seated_on = None      # (banco, assento) quando sentado
@@ -101,19 +105,22 @@ class Character:
             length = 0.0                     # (pula a parte de "andar" abaixo)
         if length > 0.01:  # andar cancela qualquer ação
             x, y = x / length, y / length  # diagonal não fica mais rápida
+            run = self.running and "run" in self.sheets
+            # vetor menor que 1 = passo mais curto (a rotina freia ao chegar no ponto)
+            speed = (self.run_speed if run else self.speed) * min(1.0, length)
             # Move um eixo por vez: assim ele "desliza" encostado nos objetos
-            nx = self.x + x * self.speed * dt
+            nx = self.x + x * speed * dt
             if not world.blocked(self.feet_rect(nx, self.y)):
                 self.x = nx
-            ny = self.y + y * self.speed * dt
+            ny = self.y + y * speed * dt
             if not world.blocked(self.feet_rect(self.x, ny)):
                 self.y = ny
             # direção "dominante" (ignora componentes pequenos)
             self.dir = dir_from_vector(round(x * 1.4), round(y * 1.4))
             if abs(x) > 0.2:
                 self.facing = "right" if x > 0 else "left"
-            self.state = "walk"
-        elif self.state == "walk":
+            self.state = "run" if run else "walk"
+        elif self.state in ("walk", "run"):
             self.state = "idle"
         world.clamp(self)
 

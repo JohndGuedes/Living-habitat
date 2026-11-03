@@ -53,6 +53,8 @@ LINES = {
     "shade_see":  ["...!", "hm?!", "quem tá aí?", "uma sombra..."],
     "shade_ask":  ["quem é você?", "oi...?", "...", "você é como eu?"],
     "shade_gone": ["sumiu...", "hm...", "estranho..."],
+    "listen":     ["que música bonita", "*escuta*", "ela tá tocando!", "shhh..."],
+    "listen_end": ["*bate palminhas*", "bis!", "gostei muito", "que lindo..."],
 }
 
 # Taxas por segundo (tempo real)
@@ -67,6 +69,7 @@ SLEEP_THRESHOLD = 0.15          # energia abaixo disso = vai dormir
 NIGHT_SLEEP_THRESHOLD = 0.55    # à noite dorme mais cedo
 NEED_THRESHOLD = 0.75           # fome/sede acima disso = vai resolver
 MANUAL_PAUSE = 8.0              # segundos sem tecla até a rotina voltar
+RUN_DIST = 380                  # caminho mais longo que isso = corre (se tiver "run")
 
 
 class Brain:
@@ -266,24 +269,37 @@ class Brain:
         if tolerance is None:
             tolerance = 22.0 if self.c.locomotion == "leap" else 6.0
         path = self.world.find_path((self.c.x, self.c.y), target)
+        # caminho longo: corre (se tiver a animação "run")
+        dist, px, py = 0.0, self.c.x, self.c.y
+        for wx, wy in path:
+            dist, px, py = dist + math.hypot(wx - px, wy - py), wx, wy
+        self.c.running = dist > RUN_DIST
+        try:
+            yield from self._follow(path, tolerance)
+        finally:
+            self.c.running = False
+            self.axis = (0.0, 0.0)
+        while self.c.state in ("takeoff", "leap", "land"):  # termina o salto
+            yield
+
+    def _follow(self, path, tolerance):
         for wx, wy in path:
             stuck, last = 0.0, (self.c.x, self.c.y)
             while math.hypot(wx - self.c.x, wy - self.c.y) > tolerance:
                 dx, dy = wx - self.c.x, wy - self.c.y
                 d = math.hypot(dx, dy)
-                self.axis = (dx / d, dy / d)
+                # último passo mais curto: chega no ponto em vez de passar dele
+                spd = self.c.run_speed if self.c.running and "run" in self.c.sheets else self.c.speed
+                k = min(1.0, d / max(1e-6, spd * self.dt)) / d
+                self.axis = (dx * k, dy * k)
                 yield
                 moved = math.hypot(self.c.x - last[0], self.c.y - last[1])
                 last = (self.c.x, self.c.y)
                 # (no salto ele fica parado enquanto agacha/aterrissa: só conta no ar)
-                if self.c.state in ("walk", "leap"):
+                if self.c.state in ("walk", "run", "leap"):
                     stuck = stuck + self.dt if moved < self.c.speed * self.dt * 0.25 else 0.0
                 if stuck > 0.8:
-                    self.axis = (0.0, 0.0)
                     return
-        self.axis = (0.0, 0.0)
-        while self.c.state in ("takeoff", "leap", "land"):  # termina o salto
-            yield
 
     def burrow_to(self, target):
         """Viaja por baixo da terra: enterra, some, brota no destino."""
@@ -396,6 +412,38 @@ class Brain:
         yield from self.wait(3)
         if not shade.visible:
             self.say("shade_gone", 0.8)
+        yield from self.wait(2)
+
+    def listen_to(self, musician):
+        """Alguém começou a tocar: às vezes vem ouvir (se estiver livre)."""
+        if self.available() and self.rng.random() < 0.55:
+            self.force("ouvir", self.t_listen(musician))
+
+    def t_listen(self, musician):
+        """Chega perto de quem está tocando, escuta e aplaude no fim."""
+        yield from self.wait(self.rng.uniform(0.5, 2.0))
+        side = 1 if self.c.x > musician.x else -1
+        spot = self.world.nearest_walkable(musician.x + side * self.rng.uniform(120, 170),
+                                           musician.y + self.rng.uniform(-25, 25), self.c.feet_rect)
+        if math.hypot(spot[0] - self.c.x, spot[1] - self.c.y) > 60:
+            yield from self.walk_to(spot)
+        self.face("left" if musician.x < self.c.x else "right")
+        self.say("listen", 0.7)
+        t, next_line = 0.0, self.rng.uniform(8, 14)
+        while musician.state == "needolin" and t < 60:
+            next_line -= self.dt
+            if next_line <= 0:
+                next_line = self.rng.uniform(10, 18)
+                if "happy" in self.c.sheets and self.rng.random() < 0.5:
+                    yield from self.play("happy")     # o Grub se alegra
+                else:
+                    self.say("listen", 0.4)
+            yield
+            t += self.dt
+        self.say("listen_end", 0.8)
+        self.boredom = max(0.0, self.boredom - 0.3)
+        if "happy" in self.c.sheets:
+            yield from self.play("happy")
         yield from self.wait(2)
 
     # ---------- tarefas ----------
@@ -525,7 +573,7 @@ class Brain:
 
 
 # ==========================================================================
-# HORNET — séria, treina muito, costura sentada, se move saltando.
+# HORNET — séria, treina muito, costura sentada, toca a agulha (needolin).
 # Fala com as palavras dela do jogo ("Shaw!", "Garama!", "Adino!", "Hegale!").
 HORNET_LINES = {
     "greet":      ["Hmph.", "O que foi?", "...", "Adino.", "Sim?"],
@@ -557,6 +605,9 @@ HORNET_LINES = {
     "shade_see":  ["Uma sombra...", "Vazio.", "Tsc. Aquilo de novo.", "Fique longe."],
     "shade_ask":  ["Saia daqui.", "O que você quer?", "Hm..."],
     "shade_gone": ["Foi embora.", "Hm. Melhor assim."],
+    "needolin":   ["Ouça.", "Uma canção antiga.", "...", "*toca a agulha*"],
+    "needolin_night": ["Para a noite.", "Uma canção de casa.", "..."],
+    "needolin_end": ["Hm.", "Basta por hoje.", "..."],
 }
 
 
@@ -580,6 +631,8 @@ class HornetBrain(Brain):
             ("treinar", self.t_train, 14 + 10 * self.boredom),
             ("parado", self.t_idle, 12),
             ("banco", self.t_bench, self.bench_weight()),
+            ("pular", self.t_jump, 3 + 5 * self.boredom),
+            ("tocar", self.t_needolin, self.needolin_weight()),
         ]
         if self.thirst > 0.45 and self.world.shore:
             options.append(("beber", self.t_drink, 18))
@@ -596,6 +649,32 @@ class HornetBrain(Brain):
     def _stand_then(self, gen):
         yield from self.play("stand_up")
         yield from gen
+
+    def needolin_weight(self):
+        if "needolin" not in self.c.sheets:
+            return 0
+        return 4 + (6 if self.env.phase in ("Tarde", "Entardecer", "Noite") else 0)
+
+    def t_needolin(self):
+        """Toca a agulha como um instrumento. Quem estiver livre vem ouvir."""
+        night = self.env.phase == "Noite"
+        yield from self.walk_to(self.free_point(260))
+        self.say("needolin_night" if night and self.rng.random() < 0.5 else "needolin", 0.6)
+        self.c.do_action("needolin")
+        for o in getattr(self, "others", ()):
+            if o is not self.c and o.brain:
+                o.brain.listen_to(self.c)
+        try:
+            t, until = 0.0, self.rng.uniform(25, 45)
+            while t < until and self.c.state == "needolin":
+                yield
+                t += self.dt
+        finally:
+            if self.c.state == "needolin":
+                self.c.state = "idle"
+        self.say("needolin_end", 0.6)
+        self.boredom = max(0.0, self.boredom - 0.5)
+        yield from self.wait(1.5)
 
     def t_look(self):
         self.say("look", 0.5)
@@ -659,6 +738,8 @@ GRUB_LINES = {
     "morning":    ["dia!", "sol!"],
     "stars":      ["estrelinhas!"],
     "shade_see":  ["medo!!", "buáá!", "fantasma!", "*treme*"],
+    "listen":     ["música!", "lalala!", "hihi, que bonito", "*balança*"],
+    "listen_end": ["de novo!", "eba!!", "mais!"],
 }
 
 

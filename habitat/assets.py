@@ -96,7 +96,10 @@ def _load_frame_folders(definition: dict) -> dict[str, SpriteSheet]:
     p.ex. quando a agulha passa abaixo dos pés), "shift_x" e "scale" (multiplica
     a escala do personagem, para sequências desenhadas em outro tamanho).
     Quadros de tamanhos diferentes dentro da mesma animação são alinhados pela
-    base-centro de cada um."""
+    base-centro de cada um.
+
+    "pivot": "center" (por animação): os pés ficam no CENTRO de cada imagem
+    (quadros salvos assim por tools/extract_atlas.py, já alinhados entre si)."""
     root = SPRITES_DIR / definition["frames_root"]
     scale = definition.get("scale", 1)
 
@@ -132,7 +135,17 @@ def _load_frame_folders(definition: dict) -> dict[str, SpriteSheet]:
     for name, imgs in raw.items():
         anim = definition["animations"][name]
         foot, shift = anim.get("foot", 0), anim.get("shift_x", 0)
-        if len({img.get_size() for img in imgs}) == 1:
+        if anim.get("pivot") == "center":  # pés no centro de cada imagem
+            w, h = max(i.get_width() for i in imgs), max(i.get_height() for i in imgs)
+            full = []
+            for img in imgs:
+                c = pygame.Surface((w, h), pygame.SRCALPHA)
+                c.blit(img, ((w - img.get_width()) // 2, (h - img.get_height()) // 2))
+                full.append(c)
+            union = union_of(full)
+            frames = [img.subsurface(union) for img in full]
+            ax, ay = w // 2 - union.x + shift, h // 2 - union.y - foot
+        elif len({img.get_size() for img in imgs}) == 1:
             union = union_of(imgs)
             feet = imgs[0].get_bounding_rect()
             frames = [img.subsurface(union) for img in imgs]
