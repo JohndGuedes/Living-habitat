@@ -1,0 +1,9 @@
+@echo off
+REM Clique duas vezes para jogar. Cria o ambiente na primeira vez.
+cd /d "%~dp0"
+if not exist ".venv\Scripts\python.exe" (
+    python -m venv .venv
+    .venv\Scripts\python -m pip install -r requirements.txt
+)
+.venv\Scripts\python main.py
+if errorlevel 1 pause
