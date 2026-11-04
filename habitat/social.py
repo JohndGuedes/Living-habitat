@@ -166,7 +166,7 @@ class Society:
 
     def _bench_direct(self, k, h, script):
         t = 0.0
-        while not (k.state == "bench_sit" and h.state == "bench_sit"):   # espera os dois sentarem
+        while not (k.seated_on and h.seated_on):   # espera os dois sentarem
             yield
             t += self.dt
             if t > 30 or "banco" not in (k.brain.task_name, ) or h.brain.task_name != "banco":
@@ -174,7 +174,7 @@ class Society:
         yield from self._wait(1.5)
         for who, text, action in script:
             c = k if who == "a" else h
-            if c.state != "bench_sit":
+            if not c.seated_on:
                 break                                # alguém levantou
             if text:
                 c.say(text)

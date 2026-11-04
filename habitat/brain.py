@@ -55,7 +55,23 @@ LINES = {
     "shade_gone": ["sumiu...", "hm...", "estranho..."],
     "listen":     ["que música bonita", "*escuta*", "ela tá tocando!", "shhh..."],
     "listen_end": ["*bate palminhas*", "bis!", "gostei muito", "que lindo..."],
+    "wind":       ["que vento bom", "*sente o vento*", "ahh...", "o vento tá forte"],
+    "map":        ["deixa eu ver o mapa", "hmm, onde eu tô?", "*anota no mapa*", "marcando aqui..."],
+    "map_walk":   ["vamos ver o mapa...", "por aqui, acho", "hmm, mapa..."],
+    "special":    ["agora!", "HYAH!", "golpe especial!"],
+    "swim":       ["vou nadar!", "água!", "tibum!", "que calor, vou pro lago"],
+    "swimming":   ["que água boa", "*nada*", "glub", "fresquinho"],
+    "swim_out":   ["chega de nadar", "*sacode*", "molhadinho"],
+    "travel":     ["vou pra outra ilha", "explorar lá!", "o que tem do outro lado?", "partiu"],
+    "arrive":     ["cheguei!", "hmm, aqui...", "olha só", "que lugar"],
+    "cave_sleep": ["hora de ir pra caverna", "minha caverna...", "dormir no quentinho"],
+    "shelter":    ["chuva! pra caverna!", "vou me abrigar", "aqui não molha"],
+    "sheltered":  ["sequinho aqui", "*ouve a chuva*", "plic plic lá fora"],
+    "rain_over":  ["parou de chover!", "vamos lá fora", "o céu abriu"],
 }
+
+# Animações de quem está sentado no banco
+SEATED = ("sit_down", "bench_sit", "map_look", "map_write", "bench_leave")
 
 # Taxas por segundo (tempo real)
 ENERGY_DRAIN_DAY = 1 / 1500     # ~25 min acordado de dia até cansar
@@ -102,6 +118,7 @@ class Brain:
         self.last_flash = 0.0
         self.recent = []           # últimas falas (evita repetir)
         self.others = ()           # outros personagens (o Game preenche)
+        self.worlds = {world.name: world} if hasattr(world, "name") else {}   # todas as áreas (Game)
 
     # ---------- falas ----------
     def say(self, group: str, chance: float = 1.0):
@@ -180,6 +197,9 @@ class Brain:
         self.dt = dt
         self._needs(dt)
         self._events()
+        # à noite anda/fica com a lanterna; cansado = idle de pouca vida
+        self.c.lantern = getattr(self.env, "darkness", 0) > 0.45
+        self.c.tired = self.energy < 0.3
         if self.manual > 0:
             self.manual -= dt
             return (0.0, 0.0)
@@ -230,6 +250,8 @@ class Brain:
         night = self.env.phase == "Noite"
         if self.energy < SLEEP_THRESHOLD or (night and self.energy < NIGHT_SLEEP_THRESHOLD):
             return "dormir", self.t_sleep(night)
+        if self.env.rain > 0.3 and self.find_cave() and self.rng.random() < 0.7:
+            return "abrigo", self.t_shelter()
         if self.thirst > NEED_THRESHOLD and self.world.shore:
             return "beber", self.t_drink()
         if self.hunger > NEED_THRESHOLD and self._food():
@@ -242,6 +264,9 @@ class Brain:
             ("olhar o céu", self.t_look_up, 6 + (8 if night else 0)),
             ("ver o lago", self.t_visit_pond, 3 if self.world.shore else 0),
             ("banco", self.t_bench, self.bench_weight()),
+            ("sentir o vento", self.t_wind, self.wind_weight()),
+            ("nadar", self.t_swim, self.swim_weight()),
+            ("outra ilha", self.t_go_other, 2 if len(self.worlds) > 1 else 0),
         ]
         if self.thirst > 0.45 and self.world.shore:
             options.append(("beber", self.t_drink, 20))
@@ -252,7 +277,8 @@ class Brain:
         return names[i], fns[i]()
 
     def _food(self):
-        return [d for d in self.world.decor if d.kind.startswith(("flor", "arbusto_"))]
+        return ([d for d in self.world.decor if d.kind.startswith(("flor", "arbusto_"))]
+                + list(getattr(self.world, "food_spots", [])))
 
     # ---------- blocos de tarefa ----------
     def wait(self, secs):
@@ -261,7 +287,7 @@ class Brain:
             yield
             t += self.dt
 
-    def walk_to(self, target, tolerance=None):
+    def walk_to(self, target, tolerance=None, run=True):
         """Anda (ou salta) até `target` seguindo um caminho. Desiste se ficar preso."""
         if self.c.locomotion == "burrow":
             yield from self.burrow_to(target)
@@ -273,7 +299,7 @@ class Brain:
         dist, px, py = 0.0, self.c.x, self.c.y
         for wx, wy in path:
             dist, px, py = dist + math.hypot(wx - px, wy - py), wx, wy
-        self.c.running = dist > RUN_DIST
+        self.c.running = run and dist > RUN_DIST
         try:
             yield from self._follow(path, tolerance)
         finally:
@@ -344,7 +370,10 @@ class Brain:
         self.c.x, self.c.y = bench.seat_pos(i)
         self.c.seated_on = (bench, i)
         self.c.seat_lift = bench.seat_height - self.c.seat_drop
-        self.c.state = "bench_sit"
+        if "sit_down" in self.c.sheets:
+            self.c.do_action("sit_down")     # senta (-> bench_sit)
+        else:
+            self.c.state = "bench_sit"
 
     def leave_bench(self):
         if not self.c.seated_on:
@@ -355,7 +384,7 @@ class Brain:
         self.c.seated_on = None
         self.c.seat_lift = 0.0
         self.c.x, self.c.y = bench.approach(i)
-        if self.c.state == "bench_sit":
+        if self.c.state in SEATED:
             self.c.state = "idle"
 
     def bench_weight(self):
@@ -382,11 +411,24 @@ class Brain:
             night = self.env.phase == "Noite"
             self.say("bench_night" if night else "bench", 0.6)
             stay = stay or self.rng.uniform(25, 45) * (1.3 if night else 1.0)
+            # às vezes pega o mapa: olha, anota, olha de novo
+            map_at = self.rng.uniform(5, 12) if "map_look" in self.c.sheets and self.rng.random() < 0.5 else None
             t = 0.0
-            while t < stay and self.c.state == "bench_sit":
+            while t < stay and self.c.seated_on:
+                if map_at is not None and t >= map_at and self.c.state == "bench_sit":
+                    map_at = None
+                    self.say("map", 0.7)
+                    yield from self.play("map_look", hold=self.rng.uniform(3, 5))
+                    if "map_write" in self.c.sheets:
+                        yield from self.play("map_write", hold=self.rng.uniform(4, 7))
+                    yield from self.play("map_look", hold=self.rng.uniform(2, 3))
+                    self.c.state = "bench_sit"
+                    t += 12
                 yield
                 t += self.dt
             self.boredom = max(0.0, self.boredom - 0.3)
+            if self.c.seated_on and "bench_leave" in self.c.sheets:
+                yield from self.play("bench_leave")     # desce do banco
         finally:
             if bench.occupied.get(i) is self.c and not self.c.seated_on:
                 del bench.occupied[i]       # desistiu antes de sentar
@@ -448,9 +490,17 @@ class Brain:
 
     # ---------- tarefas ----------
     def t_wander(self):
-        self.say("wander", 0.25)
         target = self.free_point(420)
-        yield from self.walk_to(target)
+        if "walk_map" in self.c.sheets and self.rng.random() < 0.2:
+            self.say("map_walk", 0.6)             # anda lendo o mapa (devagar, sem correr)
+            self.c.walk_variant = "walk_map"
+            try:
+                yield from self.walk_to(target, run=False)
+            finally:
+                self.c.walk_variant = None
+        else:
+            self.say("wander", 0.25)
+            yield from self.walk_to(target)
         self.boredom = max(0.0, self.boredom - 0.15)
         yield from self.wait(self.rng.uniform(0.8, 3.0))
 
@@ -470,11 +520,17 @@ class Brain:
     def t_train(self):
         self.say("train", 0.8)
         yield from self.wait(0.6)
+        moves = [(a, w) for a, w in (("attack", 4), ("attack1", 2), ("attack2", 2)) if a in self.c.sheets]
         for _ in range(self.rng.randint(2, 5)):
             if self.rng.random() < 0.4:
                 self.face("left" if self.c.facing == "right" else "right")
-            yield from self.play("attack")
+            anim = self.rng.choices([a for a, _ in moves], weights=[w for _, w in moves])[0]
+            yield from self.play(anim)
             yield from self.wait(self.rng.uniform(0.15, 0.6))
+        if "special" in self.c.sheets and self.rng.random() < 0.3:   # golpe especial no fim
+            yield from self.wait(0.4)
+            self.say("special")
+            yield from self.play("special")
         self.boredom = max(0.0, self.boredom - 0.4)
         self.energy = max(0.0, self.energy - 0.015)
         yield from self.wait(1.5)
@@ -483,10 +539,252 @@ class Brain:
         if not silent:
             self.say("jump", 0.6)
         for _ in range(self.rng.randint(1, 3)):
-            yield from self.play("jump")
+            double = "double_jump" in self.c.sheets and self.rng.random() < 0.35
+            yield from self.play("double_jump" if double else "jump")
             yield from self.wait(0.15)
         self.boredom = max(0.0, self.boredom - 0.25)
         yield from self.wait(1)
+
+    # ---------- áreas (ilhas) ----------
+    def enter_area(self, name):
+        """Passa para a área `name` (pela saída de lá para cá, se houver)."""
+        if name not in self.worlds:
+            return
+        old = self.world
+        self.leave_bench()
+        self._leave_cave_now()
+        self.c.swimming = False
+        new = self.worlds[name]
+        ex = old.exit_to(name)
+        x, y = new.to_screen(ex["arrive"]) if ex else new.spawn
+        self.c.x, self.c.y = new.nav_point((x, y))
+        self.c.area = name
+        self.c.world = new
+        self.world = new
+
+    def go_area(self, name):
+        """Anda até a saída para `name` e passa para lá. Retorna True se chegou."""
+        if self.c.area == name:
+            return True
+        ex = self.world.exit_to(name)
+        if ex is None:
+            return False
+        yield from self.walk_to(ex["at"])
+        if math.hypot(ex["at"][0] - self.c.x, ex["at"][1] - self.c.y) > 30:
+            return False
+        self.enter_area(name)
+        yield from self.wait(0.6)
+        return True
+
+    def t_go_other(self):
+        others = [n for n in self.worlds if n != self.c.area]
+        if not others:
+            return
+        self.say("travel", 0.7)
+        arrived = yield from self.go_area(self.rng.choice(others))
+        if arrived:
+            self.say("arrive", 0.6)
+            self.boredom = max(0.0, self.boredom - 0.4)
+            yield from self.wait(1.5)
+
+    def find_cave(self):
+        """(área, caverna) do abrigo mais à mão (a da área atual primeiro)."""
+        names = [self.c.area] + [n for n in self.worlds if n != self.c.area]
+        for n in names:
+            w = self.worlds.get(n)
+            if w is not None and w.caves:
+                return n, w.caves[0]
+        return None
+
+    def _cave_door(self, cave):
+        if cave.door is None:
+            cave.door = self.world.nearest_walkable(*cave.door_hint, self.c.feet_rect)
+        return cave.door
+
+    def _glide(self, target, face_dir):
+        """Anda até `target` ignorando o chão (entrar/sair da caverna)."""
+        sx, sy = self.c.x, self.c.y
+        d = math.hypot(target[0] - sx, target[1] - sy)
+        dur = max(0.3, d / (self.c.speed * 0.6))
+        self.c.state, self.c.pinned, self.c.dir = "walk", True, face_dir
+        t = 0.0
+        try:
+            while t < dur:
+                k = t / dur
+                self.c.x, self.c.y = sx + (target[0] - sx) * k, sy + (target[1] - sy) * k
+                self.c.dir = face_dir
+                yield
+                t += self.dt
+        finally:
+            self.c.x, self.c.y = target
+            self.c.pinned = False
+            if self.c.state == "walk":
+                self.c.state = "idle"
+
+    def go_into_cave(self, found):
+        """Vai até a caverna (viajando se preciso) e entra. Retorna True se entrou."""
+        area, cave = found
+        if self.c.area != area:
+            ok = yield from self.go_area(area)
+            if not ok:
+                return False
+        door = self._cave_door(cave)
+        yield from self.walk_to(door)
+        if math.hypot(door[0] - self.c.x, door[1] - self.c.y) > 30:
+            return False
+        self.c.in_cave = True
+        cave.occupant = self.c
+        yield from self._glide(cave.inside, "up")       # entra de costas (into_door)
+        return True
+
+    def leave_cave(self):
+        found = self.find_cave()
+        if not self.c.in_cave or not found:
+            return
+        cave = found[1]
+        yield from self._glide(self._cave_door(cave), "down")   # sai de frente (tram_leave)
+        self._leave_cave_now()
+
+    def _leave_cave_now(self):
+        if not self.c.in_cave:
+            return
+        found = self.find_cave()
+        if found:
+            cave = found[1]
+            if cave.occupant is self.c:
+                cave.occupant = None
+            if math.hypot(self.c.x - cave.inside[0], self.c.y - cave.inside[1]) < 10:
+                self.c.x, self.c.y = self._cave_door(cave)
+        self.c.in_cave = False
+
+    def t_shelter(self):
+        """Chuva: corre para a caverna e espera passar lá dentro."""
+        self.say("shelter", 0.8)
+        found = self.find_cave()
+        if not found:
+            return
+        try:
+            inside = yield from self.go_into_cave(found)
+            if not inside:
+                return
+            t, next_line = 0.0, self.rng.uniform(15, 30)
+            while self.env.rain > 0.3 and t < 240:
+                next_line -= self.dt
+                if next_line <= 0:
+                    next_line = self.rng.uniform(20, 40)
+                    self.say("sheltered", 0.5)
+                yield
+                t += self.dt
+            if self.env.rain <= 0.3:
+                self.say("rain_over", 0.7)
+            yield from self.leave_cave()
+        finally:
+            if self.c.in_cave and self.c.state not in ("sleep", "lie_down"):
+                self._leave_cave_now()
+
+    def wind_weight(self):
+        if "cast" not in self.c.sheets:
+            return 0
+        return 3 + (6 if self.env.rain > 0.3 else 0)
+
+    def t_wind(self):
+        """Para, abre a capa e sente o vento (cast)."""
+        self.say("wind", 0.7)
+        yield from self.play("cast")
+        self.boredom = max(0.0, self.boredom - 0.15)
+        yield from self.wait(self.rng.uniform(1, 2.5))
+
+    def swim_weight(self):
+        if "swim" not in self.c.sheets or not getattr(self.world, "water_cells", None) or not self._swim_spots():
+            return 0
+        if self.env.phase == "Noite" or self.env.rain > 0.3:
+            return 0
+        hot = (self.env.data or {}).get("temp", 28) >= 30
+        return 2 + (4 if hot else 0)
+
+    def _hop(self, frm, to, anim="jump"):
+        """Pula de `frm` até `to` (move junto com o arco do pulo)."""
+        self.c.do_action(anim)
+        dur = self.c.sheets[anim].duration if anim in self.c.sheets else 0.4
+        t = 0.0
+        while t < dur:
+            k = min(1.0, t / dur)
+            self.c.x = frm[0] + (to[0] - frm[0]) * k
+            self.c.y = frm[1] + (to[1] - frm[1]) * k
+            yield
+            t += self.dt
+        self.c.x, self.c.y = to
+
+    def _swim_to(self, target):
+        """Nada em linha reta até `target` (desiste se travar)."""
+        stuck = 0.0
+        while math.hypot(target[0] - self.c.x, target[1] - self.c.y) > 8:
+            dx, dy = target[0] - self.c.x, target[1] - self.c.y
+            d = math.hypot(dx, dy)
+            k = min(1.0, d / max(1e-6, self.c.speed * 0.5 * self.dt)) / d
+            self.axis = (dx * k, dy * k)
+            last = (self.c.x, self.c.y)
+            yield
+            moved = math.hypot(self.c.x - last[0], self.c.y - last[1])
+            stuck = stuck + self.dt if moved < self.c.speed * 0.5 * self.dt * 0.25 else 0.0
+            if stuck > 0.8:
+                break
+        self.axis = (0.0, 0.0)
+
+    def _swim_spots(self):
+        """Pontos da margem com água funda ao lado: [(x, y, lado, entrada_na_água)]."""
+        cache = self.__dict__.setdefault("_spots_cache", {})
+        if self.world.name not in cache:
+            out = []
+            for x, y, side in self.world.shore:
+                sx = 1 if side == "right" else -1
+                entry = next(((x + sx * d, y) for d in range(40, 200, 8)
+                              if self.world.swimmable(self.c.feet_rect(x + sx * d, y))), None)
+                if entry:
+                    out.append((x, y, side, entry))
+            cache[self.world.name] = out
+        return list(cache[self.world.name])
+
+    def t_swim(self):
+        """Vai à beira do lago, pula na água, nada um pouco e volta."""
+        spots = self._swim_spots()
+        if not spots:
+            return
+        self.say("swim", 0.8)
+        spots.sort(key=lambda s: (s[0] - self.c.x) ** 2 + (s[1] - self.c.y) ** 2)
+        x, y, side, entry = self.rng.choice(spots[:4])
+        yield from self.walk_to((x, y))
+        if math.hypot(x - self.c.x, y - self.c.y) > 20:
+            return
+        self.face(side)
+        shore = (self.c.x, self.c.y)
+        try:
+            yield from self._hop(shore, entry)          # tibum
+            self.c.swimming = True
+            yield from self.play("swim_enter")
+            for _ in range(self.rng.randint(2, 4)):
+                p = self.world.water_point(self.rng, near=(self.c.x, self.c.y), radius=220)
+                if p and self.world.clear_water((self.c.x, self.c.y), p):
+                    yield from self._swim_to(p)
+                self.say("swimming", 0.3)
+                yield from self.wait(self.rng.uniform(1.5, 4))
+            if self.world.clear_water((self.c.x, self.c.y), entry):
+                yield from self._swim_to(entry)
+            else:
+                self.c.x, self.c.y = entry
+            self.face("left" if shore[0] < self.c.x else "right")
+            self.c.swimming = False
+            yield from self._hop((self.c.x, self.c.y), shore)   # sai da água
+            self.thirst = max(0.0, self.thirst - 0.3)
+            self.boredom = max(0.0, self.boredom - 0.5)
+            self.say("swim_out", 0.7)
+            yield from self.wait(1.5)
+        finally:
+            if self.c.swimming:                          # interrompido: volta para a margem
+                self.c.swimming = False
+                self.c.x, self.c.y = shore
+                if self.c.state not in ("sleep", "lie_down"):
+                    self.c.state = "idle"
 
     def _go_shore(self):
         """Vai até um ponto na beira do lago e vira para a água. Retorna True se chegou."""
@@ -540,9 +838,22 @@ class Brain:
     def t_sleep(self, night):
         self.say("sleepy")
         yield from self.wait(2.0)
-        # procura um cantinho tranquilo por perto (o Grub só se enterra onde está)
-        if self.c.locomotion != "burrow":
+        cave = self.find_cave() if night and self.c.locomotion != "burrow" else None
+        if cave:                             # à noite dorme na caverna
+            self.say("cave_sleep", 0.6)
+            inside = yield from self.go_into_cave(cave)
+            if not inside:
+                cave = None
+        if not cave and self.c.locomotion != "burrow":
+            # procura um cantinho tranquilo por perto (o Grub só se enterra onde está)
             yield from self.walk_to(self.free_point(160))
+        try:
+            yield from self._sleep_here(night)
+        finally:
+            if self.c.in_cave and self.c.state not in ("sleep", "lie_down"):
+                self._leave_cave_now()
+
+    def _sleep_here(self, night):
         self.c.toggle_sleep()  # deita -> dorme
         yield
         duration = self.rng.uniform(300, 600) if night else self.rng.uniform(60, 150)
@@ -561,6 +872,8 @@ class Brain:
         self.c.toggle_sleep()  # acorda
         while self.c.state == "wake":
             yield
+        if self.c.in_cave:
+            yield from self.leave_cave()
         phase = self.env.phase
         if night and phase in ("Amanhecer", "Dia"):
             self.say("wake_day")        # dormiu a noite e amanheceu

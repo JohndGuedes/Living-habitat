@@ -402,6 +402,26 @@ class Bench(Prop):
         return self.x + self.seats[i], self.y + 34
 
 
+class Cave(Prop):
+    """Caverna no fundo da ilha (arte: "file", recortada por tools/make_areas.py).
+    É o abrigo: à noite ele dorme lá dentro e foge da chuva para lá.
+
+    `inside`: ponto "lá dentro" (na boca da caverna, logo à frente da base, para
+    ser desenhado por cima dela, escurecido). `door`: onde parar na grama antes
+    de entrar (o mundo acha o ponto andável mais perto de `door_hint`)."""
+    kind = "cave"
+
+    def __init__(self, x, y, defn):
+        super().__init__(x, y, defn)
+        self.inside = (x, y + 4)
+        self.door_hint = (x, y + defn.get("door_dy", 70))
+        self.door = None
+        self.occupant = None
+
+    def draw_ground(self, surface):
+        pass
+
+
 class Lamp(Prop):
     """Poste com lâmpadas que acendem à noite. "lights": posições das lâmpadas
     (px da arte ORIGINAL, relativos ao ponto da base)."""
@@ -427,7 +447,7 @@ class Lamp(Prop):
         add_light(surface, self.pool, (round(self.x - 40), round(self.y + 30)), on)
 
 
-KINDS = {cls.kind: cls for cls in (House, Tree, Campfire, Dummy, Bench, Lamp)}
+KINDS = {cls.kind: cls for cls in (House, Tree, Campfire, Dummy, Bench, Lamp, Cave)}
 
 
 def make_prop(defn: dict) -> Prop:

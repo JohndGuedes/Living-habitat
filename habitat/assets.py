@@ -121,6 +121,21 @@ def _load_frame_folders(definition: dict) -> dict[str, SpriteSheet]:
 
     sheets = {}
     if definition.get("align", "union") == "union":
+        # "offset": (dx, dy) por animação = pasta com tela de outro tamanho; coloca os
+        # quadros nessa posição em relação aos outros (todos vão para uma tela comum)
+        offs = {n: definition["animations"][n].get("offset", (0, 0)) for n in raw}
+        if any(o != (0, 0) for o in offs.values()) or len({i.get_size() for v in raw.values() for i in v}) > 1:
+            x0 = min(0, *(o[0] for o in offs.values()))
+            y0 = min(0, *(o[1] for o in offs.values()))
+            W = max(offs[n][0] - x0 + i.get_width() for n, v in raw.items() for i in v)
+            H = max(offs[n][1] - y0 + i.get_height() for n, v in raw.items() for i in v)
+            for n, imgs in raw.items():
+                placed = []
+                for img in imgs:
+                    c = pygame.Surface((W, H), pygame.SRCALPHA)
+                    c.blit(img, (offs[n][0] - x0, offs[n][1] - y0))
+                    placed.append(c)
+                raw[n] = placed
         union = union_of([img for imgs in raw.values() for img in imgs])
         anchor_imgs = raw.get(definition.get("anchor_anim", "idle")) or next(iter(raw.values()))
         feet = anchor_imgs[0].get_bounding_rect()
@@ -130,6 +145,7 @@ def _load_frame_folders(definition: dict) -> dict[str, SpriteSheet]:
             cells = [[_scale(img.subsurface(union), scale) for img in imgs]]
             sheets[name] = SpriteSheet(cells, name, anchor=anchor,
                                        source_size=imgs[0].get_size(), **_common_opts(definition, anim))
+        _extras(sheets, definition, root, scale)
         return sheets
 
     for name, imgs in raw.items():
@@ -163,7 +179,59 @@ def _load_frame_folders(definition: dict) -> dict[str, SpriteSheet]:
         cells = [[_scale(f, k) for f in frames]]
         sheets[name] = SpriteSheet(cells, name, anchor=(ax * k, ay * k),
                                    source_size=imgs[0].get_size(), **_common_opts(definition, anim))
+    _extras(sheets, definition, root, scale)
     return sheets
+
+
+def _extras(sheets, definition, root, scale):
+    """Opções extras por animação:
+      "glow": True   acha em cada quadro o ponto de luz (a lanterna: pixels quase
+                     brancos na parte de baixo do desenho) -> sheet.glow
+      "effect": {...} efeito desenhado por cima, de outra pasta (brilho do golpe):
+          "dir"    pasta (relativa a frames_root)
+          "start"  quadro do corpo em que o efeito começa
+          "frame_duration", "scale" (multiplica a escala do personagem)
+          "at"     (dx, dy) do CENTRO do efeito em relação aos pés, em px da arte
+                   original, com a arte olhando para o lado de art_faces"""
+    for name, sheet in sheets.items():
+        anim = definition["animations"][name]
+        if anim.get("glow"):
+            sheet.glow = [_glow_point(c) for c in sheet.cells[0]]
+        if anim.get("effect"):
+            _attach_effect(sheet, anim["effect"], root, scale)
+
+
+def _glow_point(img):
+    box = img.get_bounding_rect()
+    if not box.w:
+        return None
+    top = box.y + int(box.h * 0.55)
+    sx = sy = n = 0
+    for y in range(top, box.bottom, 2):
+        for x in range(box.x, box.right, 2):
+            c = img.get_at((x, y))
+            if c.a > 200 and c.r > 235 and c.g > 235 and c.b > 235:
+                sx, sy, n = sx + x, sy + y, n + 1
+    return (sx / n, sy / n) if n else None
+
+
+def _attach_effect(sheet, fx, root, scale):
+    files = _anim_files(root, fx)
+    if not files:
+        return
+    k = scale * fx.get("scale", 1)
+    frames = [_scale(pygame.image.load(f).convert_alpha(), k) for f in files]
+    ax, ay = fx.get("at", (0, 0))
+    flipped = [pygame.transform.flip(f, True, False) for f in frames]
+    if fx.get("flip"):                 # arte do efeito desenhada para o outro lado
+        frames, flipped = flipped, frames
+    sheet.effect = {
+        "frames": frames,
+        "flipped": flipped,
+        "start": fx.get("start", 0) * sheet.frame_duration,
+        "frame_duration": fx.get("frame_duration", 0.05),
+        "at": (ax * scale, ay * scale),
+    }
 
 
 def load_prop_frames(kind: str, scale: float = 1, file: str | None = None) -> list[pygame.Surface] | None:

@@ -56,6 +56,8 @@ class SpriteSheet:
         self.direction_order = direction_order
         self.flipped = ([[pygame.transform.flip(c, True, False) for c in row] for row in cells]
                         if art_faces else None)
+        self.glow = None     # [(x, y) da luz em cada quadro (lanterna), em px do quadro] ou None
+        self.effect = None   # efeito desenhado por cima (golpes): veja assets._attach_effect
 
     @classmethod
     def from_grid(cls, image: pygame.Surface, name: str, frames: int, rows: int = 1,

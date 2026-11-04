@@ -14,7 +14,12 @@ projeto é feito **por etapas**, e o dono fala português: escreva comentários,
 python -m venv .venv; .venv\Scripts\python -m pip install -r requirements.txt   # setup manual
 ```
 
-Moradores: **Knight** (controlável pelo teclado), **Hornet** e **Grub**. Cada um tem rotina própria
+**Agora só o Knight está em cena** (`config.RESIDENTS = ("knight",)`, `SHADE_ENABLED = False`): o
+usuário está trabalhando primeiro nos sprites dele. Para trazer os outros de volta, use
+`RESIDENTS = ("knight", "hornet", "grub")`. Sem par, `Society` fica `None`; sem a Sombra, `shade` fica
+`None`.
+
+Moradores possíveis: **Knight** (controlável pelo teclado), **Hornet** e **Grub**. Cada um tem rotina própria
 (`brain.py`) e eles se encontram e interagem (`social.py`). O Knight vive sozinho pela **rotina**. Usar o teclado assume o controle e a rotina volta
 8 s depois da última tecla. Clicar nele sem arrastar faz ele responder (cutucão).
 
@@ -22,6 +27,12 @@ Teclas: WASD/setas para mover; **Z** para dormir/acordar, **E** para comer, **Es
 **F** para atacar (teclas de teste dos sprites); **T** para alternar a hora (auto/dia/tarde/noite) e
 **R** para alternar a chuva (auto/sim/não), para testar o ambiente; **P** para o overlay de debug, que
 também mostra as áreas sólidas; Esc para sair.
+
+Teste de sprites (`Game.play_test`):
+- **N**/**B**: toca a animação seguinte/anterior do Knight, com o nome no topo (`show`/`draw_flash`).
+  Andar e correr ficam no lugar (`Character.pinned`) até uma tecla de movimento.
+- **M**: liga e desliga a rotina. Desligada, ele fica parado esperando as teclas.
+- **C**: vai para a outra ilha na hora. Andar com o teclado até uma saída também faz a viagem.
 
 Janela (popup para deixar num canto do monitor observando):
 - **F2**: fixar por cima.
@@ -134,22 +145,45 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     estado.
   - `toggle_sleep()` faz lie_down → sleep, e na volta wake → idle.
   - Andar cancela qualquer ação.
-- `world.py`: céu em degradê e a **ilha flutuante** como chão: `world/ground/ground.png`, escalada
-  para caber na tela e centralizada (`ground_pos`). A colisão com o chão vem de
-  `world/ground/walkable.png` (branco = anda), virada `pygame.mask` e esticada sobre a ilha.
-  - `walkable(rect)` exige que os pés estejam inteiros na área andável; `blocked(rect)` soma a isso os
-    objetos sólidos.
-  - `nearest_walkable` corrige o spawn.
+- **Áreas (ilhas)**: o habitat tem duas, descritas em `scene.AREAS`. O `Game` cria um `World` por
+  área (`game.worlds`), e `game.world` é a que está na tela (`viewing`, a área do Knight).
+  - Cada `Character` tem `area`. Só os personagens da área mostrada são desenhados, mas todos são
+    atualizados no mundo deles.
+  - Viagem: `Brain.go_area`/`enter_area` usa as saídas (`world.exits`: `at` e `arrive`). A troca de
+    área tem um escurecimento (`game.fade`).
+  - **lago**: ilha com lago, banco e poste. É onde todos começam (`START_AREA`).
+  - **caverna**: ilha com lago menor e a **caverna** no fundo (`props.Cave`, arte `cave.png`). É o
+    abrigo: à noite ele dorme lá dentro (`t_sleep`) e na chuva se abriga (`t_shelter`, 70% das
+    escolhas com `env.rain` > 0,3).
+  - Para entrar: `go_into_cave` anda até a `door` e desliza (`_glide`) até `inside` de costas
+    (`walk_up`); sai de frente (`walk_down`). Dentro, `in_cave` desenha o personagem escurecido.
+- `world.py`: um `World(width, height, area)` por ilha. Céu em degradê e a ilha
+  (`world/areas/<área>/ground.png`), escalada para caber na tela (`k`, `ground_pos`). `top_room`
+  reserva espaço acima, para a caverna.
+  - Posições de `scene.py` vêm em px da imagem; `to_screen` converte. `_place` faz o mesmo nos props,
+    com `scale` relativa à ilha.
+  - Colisão: `walkable.png` (branco = anda) vira `pygame.mask` esticada sobre a ilha.
+    `walkable(rect)` exige os pés inteiros na área andável; `blocked(rect)` soma os objetos sólidos.
+  - Água: `water.png` (`_load_water`), usada por `swimmable`/`water_cells`/`clear_water` e por
+    `shore` (margens).
+  - Comida: `food_spots` (`FoodSpot`, das florzinhas brilhantes em `meta.json`), usados por `t_eat`
+    junto com as plantas de `decor`.
   - Navegação (`build_nav`, chamado pelo Game depois de criar o personagem): grade de 16 px
     (`nav`/`nav_cells`), `find_path` (BFS em 8 direções, simplificado em retas com `clear_line`),
-    `random_point` e `shore` (pontos andáveis com água do lago ao lado, detectada pela cor da ilha,
-    com o lado da água).
-  - `draw_debug` desenha o contorno da área andável (tecla P).
+    `random_point` e `nav_point`. As saídas são ajustadas para a célula andável mais perto.
+  - `draw_debug` (tecla P): contorno andável (ciano), lago (azul), saídas (círculo amarelo) e comida
+    (pontos verdes).
   - Há ainda `shade_at` e `draw_lights` para os objetos.
-- `scene.py`: layout do mapa (`SCENE`: tipo e `pos` = **base** do objeto, em px de tela), `SPAWN` e
-  `SPAWNS`. Hoje tem o banco (`items/town_bench_lit.png`) e o poste logo atrás (`items/cliffs_lamp.png`).
-  O cenário está sendo refeito aos poucos. Os objetos provisórios antigos (casa, árvore, fogueira,
-  bonecos) continuam em `props.py`, mas só voltam quando o usuário pedir.
+- `scene.py`: `AREAS`. Para cada área:
+  - `folder`;
+  - `props` (`img_pos` = **base** do objeto em px da imagem);
+  - `spawn`/`spawns`;
+  - `exits`;
+  - `top_room`.
+
+  Também ficam lá `START_AREA` e `DECOR` por área (hoje vazio: as ilhas novas já têm plantas e
+  `gramas.png` é bem mais clara). Os objetos provisórios antigos (casa, árvore, fogueira, bonecos)
+  continuam em `props.py`, mas só voltam quando o usuário pedir.
 - `decor.py`: **plantas animadas** espalhadas pela grama, usando a arte `world/gramas/gramas.png`.
   - Os desenhos são achados com `mask.get_bounding_rects` e agrupados em linhas; `SETS` mapeia
     `tipo -> (linha, início, fim)`.
@@ -216,27 +250,43 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
 `assets/sprites/character/the_knight/` tem cerca de 70 pastas de animação, extraídas do jogo. Cada
 quadro tem 349x186, a arte olha para a **esquerda** e o índice completo está em `Knight_aaaaa_info.txt`.
 
-Mapeamento atual:
+Mapeamento atual (o usuário definiu quais pastas são o quê):
 
-| Ação | Pastas |
-|---|---|
-| idle | `idle_still` |
-| walk | `walk` |
-| lie_down | `wake_up_ground` de 5 em diante, invertido |
-| sleep | `wake_up_ground` até o quadro 4 (deitado) |
-| wake | `wake_up_ground` de 5 em diante |
-| eat | `collect_normal` (abaixar e pegar) |
-| jump | `jump` + `fall` + `land` |
-| attack | `slash_left_longer` (o golpe acerta no índice 7) |
-| bench_sit | `sit` (de frente, pernas penduradas; `art_faces: None`) |
+| Animação | Pastas | Uso na rotina |
+|---|---|---|
+| idle | `idle_still` | parado |
+| walk | `walk` | andar de lado |
+| walk_up / walk_down | `into_door` (do 2 em diante) / `tram_leave` | andando de costas / de frente (`dir` "up"/"down") |
+| tired | `idle_low_health` | parado com energia < 0,3 |
+| lantern_idle / lantern_walk | `lantern_idle` / `lantern_run` (`"glow": True`) | à noite (`env.darkness` > 0,45) |
+| walk_map, walk_map_turn | `walk_map`, `walk_map_turn` | às vezes passeia lendo o mapa |
+| lie_down / sleep / wake | `wake_up_ground` | dormir |
+| eat | `collect_normal` | comer e beber |
+| cast | `cast` | "sentir o vento" (mais na chuva) |
+| jump / double_jump | `jump`+`fall`+`land` / `jump`+`double_jump_v2`+`fall`+`land` | pular (35% duplo) |
+| look_up / look_down | `look_up` / `look_down` | céu / lago |
+| sit_down → bench_sit → bench_leave | `sit` 0–1 sentando, quadro 1 sentado, 2–4 descendo | banco |
+| map_look / map_write | `sit_map_look` / `sit_map_write` | lendo o mapa sentado no banco |
+| attack | `slash_left_longer` | treinar |
+| attack1 | `charge_slash` + efeito `_ effects/charge_slash_effect` | treinar |
+| attack2 | `cyclone_slash` + efeito `_ effects/cyclone_slash_effect` | treinar |
+| special | `nail_slash` (o brilho já vem nos quadros) | fim do treino, às vezes |
+| swim_enter / swim_idle / swim | `water_enter_to_idle` (tela 225x336, `"offset"`) / `water_surface_idle` / `water_surface_swim` | nadar no lago |
 
-Candidatas para depois:
-- `sit`, `sit_lean`, `sit_map_*`: sentar no banco
-- `focus_v2`: curar
-- `look_up` / `look_down`
-- `idle_map` / `walk_map`
-- `run`, `lantern_*`, `death_anim`, `hungry_knight_side`
-- `_ effects`: bling, poeira etc.
+As variações (cansado, lanterna, de costas/de frente, mapa, nadar) não mudam o `state`:
+`Character.anim_name()` escolhe a animação pelo `state` ("idle"/"walk") e pelas flags `tired`,
+`lantern`, `walk_variant` e `swimming`, que a rotina liga.
+
+Detalhes:
+- **Efeitos dos golpes**: `"effect"` na animação (`assets._attach_effect`) com `dir`, `start`
+  (quadro do corpo), `scale`, `flip` e `at` (centro do efeito em relação aos pés, em px da arte).
+  As posições foram ajustadas por captura de tela.
+- **Lanterna**: `"glow"` acha a luz em cada quadro (`sheet.glow`). `Character.draw_light` soma um
+  brilho nela e uma poça de luz no chão à frente, depois do escurecimento.
+- **Nadar**: `World._build_water` faz a máscara do lago pela cor da ilha (`swimmable`,
+  `water_cells`, `water_point`, `clear_water`; o contorno aparece no debug com P). `Brain.t_swim`
+  escolhe uma margem com água funda ao lado (`_swim_spots`), pula para dentro (`_hop`), nada
+  (`_swim_to`) e volta. Na água, `_draw_water_cover` cobre as pernas com os pixels do próprio lago.
 
 Não há vista de frente nem de costas (o jogo é de plataforma).
 
@@ -300,22 +350,36 @@ para a esquerda. O sprite_def é `"shade"`.
 
 - Opções por animação: `dir` ou `files`, `start`/`end`, `reverse`, `pick`, e em `per_anim` também
   `foot`, `shift_x`, `scale` e `pivot` (`"center"` = pés no centro de cada imagem).
-- `align: "union"` (o Knight) recorta tudo pelo mesmo retângulo.
+- `align: "union"` (o Knight) recorta tudo pelo mesmo retângulo. Uma pasta com tela de outro
+  tamanho usa `"offset": (dx, dy)` para se encaixar. Também há `"glow"` e `"effect"` (veja acima).
 - As outras pastas em `character/` (`NPCs`, `Tecela`, `charmander`, `froakie`) existem, mas não são usadas.
 
 O usuário fornece a arte. Não gere sprites por código (ele achou feio) e não baixe arte. Os créditos
 ficam em `CREDITS.md`. As pastas `character/charmander` e `character/froakie` são sobras da fase Pokémon
 e não são usadas.
 
-### Chão (`world/ground/`): `tools/make_ground.py`
+### Ilhas (`world/areas/<área>/`): `tools/make_areas.py`
 
-- A fonte é `source/island_reference.png` (1672x941), fornecida pelo usuário: uma ilha isométrica com
-  lago e barrancos. O xadrez de "transparência" está **desenhado** na imagem; o script o remove por
-  flood-fill a partir das bordas (pixels claros e sem cor) e gera `ground.png` com alpha.
-- `walkable.png` (418x235, 1 célula = 4 px) marca as células de grama: verde dominante e `g > b + 55`,
-  o que exclui a água rasa verde-azulada. Depois o script fecha as falhas (flores e pedras), mantém só
-  a maior região e deixa uma margem da borda.
-- O usuário pode retocar `walkable.png` à mão. Rodar o script de novo sobrescreve os dois PNGs.
+- As fontes ficam em `source/` e foram fornecidas pelo usuário. São duas ilhas escuras, no estilo
+  Hollow Knight, com fundo preto:
+  - `lago/source/island.png` (1672x941);
+  - `caverna/source/island_cave.png` (1536x1024), que traz a caverna no alto e setas mostrando onde
+    ela encaixa no fundo da ilha.
+- O script (`AREAS` no topo, em px da imagem) gera:
+  - `ground.png` (fundo removido por flood-fill de pixels escuros a partir das bordas);
+  - `walkable.png`: grama verde-azulada ou trilha de pedra cinza; fechamento, maior região, margem;
+  - `water.png`: o lago a partir de um ponto `lake`, porque as paredes dos barrancos têm cor
+    parecida. A água tem bem mais azul que verde. Os buracos pequenos são preenchidos;
+  - `meta.json`: as florzinhas brilhantes, que viram comida.
+- Na caverna:
+  - `erase` apaga as setas;
+  - `island_top` corta a ilha;
+  - `cave` é recortada por `cut_cave`: em cada coluna, tudo entre o primeiro e o último pixel do
+    desenho fica opaco, porque o interior escuro é parecido com o fundo. O resultado é `cave.png`.
+- `walkable.png`/`water.png` (1 célula = 4 px) podem ser retocados à mão. Rodar o script de novo
+  sobrescreve tudo. Com uma pasta como argumento, salva prévias com as áreas pintadas.
+- A ilha antiga (`world/ground`, `tools/make_ground.py`) foi substituída e removida; está no histórico
+  do git.
 - Hoje os planaltos (degraus da ilha) são tratados como o mesmo nível: não há altura.
 
 ## Etapas
@@ -324,8 +388,8 @@ e não são usadas.
 2. ✅ Rotina: necessidades, passear, beber no lago, comer flores, dormir (cochilos de dia, noite
    longa), treinar, pular, olhar o céu e falas contextuais.
 3. Comida (`items/`) e necessidades (fome, sono), com balão "zZ" em `ui/` ao dormir.
-4. Cenário sendo refeito aos poucos: ✅ chão (ilha com lago), ✅ plantas animadas (gramas, flores,
-   arbustos). Os objetos provisórios antigos (casa,
+4. Cenário sendo refeito aos poucos: ✅ duas ilhas (lago; caverna com abrigo) com viagem entre elas,
+   ✅ plantas animadas (gramas, flores, arbustos; desligadas nas ilhas novas). Os objetos provisórios antigos (casa,
    árvore, fogueira, bonecos) foram tirados da cena.
    Pendente: arte de verdade para eles. Ideias: entrar na casa, sentar perto da fogueira
    (`sit`), um banco.

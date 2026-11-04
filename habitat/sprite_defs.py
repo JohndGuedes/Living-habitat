@@ -36,27 +36,69 @@ CHARACTER_SPRITES = {
         "shadow": (46, 10),
         "seat_drop": 16,           # quanto as pernas ficam abaixo do assento (px de tela)
         "animations": {
+            # --- parado / andando ---
             "idle":     {"dir": "idle_still", "frame_duration": 0.12},
             "walk":     {"dir": "walk", "frame_duration": 0.09},
+            # andando de costas (para o fundo) e de frente (descendo, para a câmera)
+            "walk_up":   {"dir": "into_door", "start": 2, "frame_duration": 0.1, "art_faces": None},
+            "walk_down": {"dir": "tram_leave", "frame_duration": 0.1, "art_faces": None},
+            # cansado (energia baixa): idle de pouca vida
+            "tired":    {"dir": "idle_low_health", "frame_duration": 0.13},
+            # à noite: com a lanterna ("glow" = acha a luz em cada quadro)
+            "lantern_idle": {"dir": "lantern_idle", "frame_duration": 0.12, "glow": True},
+            "lantern_walk": {"dir": "lantern_run", "frame_duration": 0.09, "glow": True},
+            # andando lendo o mapa
+            "walk_map":      {"dir": "walk_map", "frame_duration": 0.1},
+            "walk_map_turn": {"dir": "walk_map_turn", "frame_duration": 0.15},
+            # --- ações ---
             # Deitar = levantar do chão ao contrário; dormir = quadros deitado
             "lie_down": {"dir": "wake_up_ground", "start": 5, "reverse": True,
                          "frame_duration": 0.06, "loop": False, "next": "sleep"},
             "sleep":    {"dir": "wake_up_ground", "end": 5, "frame_duration": 0.5},
             "wake":     {"dir": "wake_up_ground", "start": 5,
                          "frame_duration": 0.07, "loop": False},
-            # Comer = se abaixar para pegar algo (collect)
+            # Comer/beber = se abaixar para pegar algo (collect)
             "eat":      {"dir": "collect_normal", "frame_duration": 0.08, "loop": False},
+            # sentir o vento (cast)
+            "cast":     {"dir": "cast", "frame_duration": 0.1, "loop": False},
+            # pulo normal e pulo duplo (pulo + double_jump_v2 + queda + pouso)
             "jump":     {"dir": ["jump", "fall", "land"], "frame_duration": 0.05,
                          "loop": False, "hop": 70},
-            # Sentado no banco, de frente (a rotina levanta o desenho até o assento)
-            "bench_sit": {"dir": "sit", "pick": [0, 1, 2, 3, 4, 3, 2, 1], "frame_duration": 0.22,
-                          "art_faces": None},
+            "double_jump": {"dir": ["jump", "double_jump_v2", "fall", "land"], "frame_duration": 0.05,
+                            "loop": False, "hop": 125},
             # Olhar para cima / para baixo e ficar assim ("hold") até a rotina mudar
             "look_up":   {"dir": "look_up", "frame_duration": 0.08, "loop": False, "next": "hold"},
             "look_down": {"dir": "look_down", "frame_duration": 0.08, "loop": False, "next": "hold"},
+            # --- banco (de frente; a rotina levanta o desenho até o assento) ---
+            # sit: quadros 0-1 = sentando; 2-4 = descendo do banco
+            "sit_down":    {"dir": "sit", "end": 2, "frame_duration": 0.15, "loop": False,
+                            "next": "bench_sit", "art_faces": None},
+            "bench_sit":   {"dir": "sit", "pick": [1], "frame_duration": 1.0, "art_faces": None},
+            "bench_leave": {"dir": "sit", "start": 2, "frame_duration": 0.1, "loop": False,
+                            "art_faces": None},
+            # lendo o mapa sentado (olha -> escreve)
+            "map_look":  {"dir": "sit_map_look", "frame_duration": 0.18, "art_faces": None},
+            "map_write": {"dir": "sit_map_write", "frame_duration": 0.12, "art_faces": None},
+            # --- golpes ---
             # Golpe de ferrão; o 8º quadro (índice 7) é quando a lâmina acerta
             "attack":   {"dir": "slash_left_longer", "frame_duration": 0.045,
                          "loop": False, "hit_frame": 7},
+            # Ataque 1: golpe carregado + brilho (_ effects/charge_slash_effect)
+            "attack1":  {"dir": "charge_slash", "frame_duration": 0.06, "loop": False, "hit_frame": 3,
+                         "effect": {"dir": "_ effects/charge_slash_effect", "start": 3, "scale": 0.8,
+                                    "frame_duration": 0.05, "at": (-140, -40)}},
+            # Ataque 2: giro (ciclone) + anel (_ effects/cyclone_slash_effect)
+            "attack2":  {"dir": "cyclone_slash", "frame_duration": 0.06, "loop": False, "hit_frame": 3,
+                         "effect": {"dir": "_ effects/cyclone_slash_effect", "start": 2,
+                                    "frame_duration": 0.06, "at": (0, -38)}},
+            # Ataque especial: carrega e solta (o brilho já vem nos quadros)
+            "special":  {"dir": "nail_slash", "frame_duration": 0.06, "loop": False, "hit_frame": 13},
+            # --- água (lago) ---
+            # water_enter tem tela 225x336: "offset" encaixa no lugar dos outros
+            "swim_enter": {"dir": "water_enter_to_idle", "offset": (61, -73), "frame_duration": 0.07,
+                           "loop": False},
+            "swim_idle":  {"dir": "water_surface_idle", "frame_duration": 0.12},
+            "swim":       {"dir": "water_surface_swim", "frame_duration": 0.1},
         },
     },
     "hornet": {
