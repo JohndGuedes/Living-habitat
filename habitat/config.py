@@ -18,9 +18,9 @@ FPS = 60
 
 # Quem mora no habitat (chave de CHARACTER_SPRITES em sprite_defs.py)
 CHARACTER = "knight"
-# Moradores na cena (o 1º é CHARACTER, controlado pelo teclado). Por enquanto só o
-# Knight, para trabalhar os sprites dele; para trazer de volta: ("knight", "hornet", "grub")
-RESIDENTS = ("knight",)
+# Moradores na cena (o 1º é CHARACTER, controlado pelo teclado; Tab troca quem é controlado).
+# Opções: "knight", "daughter", "hornet", "grub"
+RESIDENTS = ("knight", "daughter")
 # A Sombra (aparição à noite/na chuva). Desligada enquanto trabalhamos só no Knight.
 SHADE_ENABLED = False
 

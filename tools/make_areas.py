@@ -40,13 +40,6 @@ AREAS = {
         "source": "source/island.png",
         "lake": (1200, 320),
     },
-    "caverna": {
-        "source": "source/island_cave.png",
-        "lake": (1150, 600),
-        "island_top": 290,                         # a ilha começa aqui (acima: caverna e setas)
-        "cave": (380, 0, 780, 288),                # retângulo da caverna (x, y, w, h)
-        "erase": [(498, 270, 42, 100), (986, 270, 42, 100)],   # as setas
-    },
 }
 
 

@@ -17,28 +17,13 @@ AREAS = {
     "lago": {
         "folder": "world/areas/lago",
         "props": [
-            # Banco e o poste logo atrás dele
-            {"kind": "lamp", "img_pos": (610, 545), "file": "items/cliffs_lamp.png", "scale": 0.82,
-             "base_offset": 42, "lights": [(-83, -313), (74, -400)]},
-            {"kind": "bench", "img_pos": (500, 590), "file": "items/town_bench_lit.png", "scale": 1.3,
+            # Banco (o poste saiu por enquanto: {"kind": "lamp", "file": "items/cliffs_lamp.png", ...})
+            {"kind": "bench", "img_pos": (500, 440), "file": "items/town_bench_lit.png", "scale": 1.3,
              "seats": [-38, 38]},
         ],
         "spawn": (760, 640),
-        "spawns": {"hornet": (1000, 700), "grub": (600, 760)},
-        # trilha de pedra no fundo -> ilha da caverna
-        "exits": [{"to": "caverna", "at": (600, 80), "arrive": (240, 400)}],
-    },
-    "caverna": {
-        "folder": "world/areas/caverna",
-        "top_room": 150,
-        "props": [
-            # a caverna encaixada no fundo da ilha (abrigo: dorme aqui à noite e foge da chuva)
-            {"kind": "cave", "img_pos": (735, 128), "file": "world/areas/caverna/cave.png", "scale": 1.0},
-        ],
-        "spawn": (700, 400),
-        "spawns": {},
-        # lado esquerdo -> ilha do lago
-        "exits": [{"to": "lago", "at": (180, 385), "arrive": (640, 140)}],
+        "spawns": {"daughter": (980, 620), "hornet": (1000, 700), "grub": (600, 760)},
+        "exits": [],
     },
 }
 START_AREA = "lago"

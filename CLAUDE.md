@@ -14,12 +14,11 @@ projeto é feito **por etapas**, e o dono fala português: escreva comentários,
 python -m venv .venv; .venv\Scripts\python -m pip install -r requirements.txt   # setup manual
 ```
 
-**Agora só o Knight está em cena** (`config.RESIDENTS = ("knight",)`, `SHADE_ENABLED = False`): o
-usuário está trabalhando primeiro nos sprites dele. Para trazer os outros de volta, use
-`RESIDENTS = ("knight", "hornet", "grub")`. Sem par, `Society` fica `None`; sem a Sombra, `shade` fica
-`None`.
+**Agora estão em cena o Knight e a Filha de Hallownest** (`config.RESIDENTS = ("knight", "daughter")`,
+`SHADE_ENABLED = False`). Para trazer os outros de volta, inclua `"hornet"` e `"grub"` em `RESIDENTS`. Com
+um morador só, `Society` fica `None`; sem a Sombra, `shade` fica `None`.
 
-Moradores possíveis: **Knight** (controlável pelo teclado), **Hornet** e **Grub**. Cada um tem rotina própria
+Moradores possíveis: **Knight** (controlável pelo teclado), **Filha de Hallownest** (`"daughter"`), **Hornet** e **Grub**. Cada um tem rotina própria
 (`brain.py`) e eles se encontram e interagem (`social.py`). O Knight vive sozinho pela **rotina**. Usar o teclado assume o controle e a rotina volta
 8 s depois da última tecla. Clicar nele sem arrastar faz ele responder (cutucão).
 
@@ -32,6 +31,7 @@ Teste de sprites (`Game.play_test`):
 - **N**/**B**: toca a animação seguinte/anterior do Knight, com o nome no topo (`show`/`draw_flash`).
   Andar e correr ficam no lugar (`Character.pinned`) até uma tecla de movimento.
 - **M**: liga e desliga a rotina. Desligada, ele fica parado esperando as teclas.
+- **Tab**: troca quem o teclado e as teclas de teste controlam (`Game.switch_control`).
 - **C**: vai para a outra ilha na hora. Andar com o teclado até uma saída também faz a viagem.
 
 Janela (popup para deixar num canto do monitor observando):
@@ -94,6 +94,9 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     - `HornetBrain`: falas próprias ("Shaw!", "Garama!"...), sem fome; senta, costura, olha em volta,
       treina, pula e toca a agulha como instrumento (`t_needolin`, mais à tarde e à noite).
       `force()` faz ela levantar antes se estiver sentada.
+    - `DaughterBrain`: falas próprias (`DAUGHTER_LINES`), calma e nostálgica. Colhe flores
+      (`t_flowers`), lembra de casa (`t_remember`), dança (`t_dance`), observa o Knight de longe
+      (`t_watch`), senta mais no banco e quase não treina.
     - `GrubBrain`: sem fome nem sede; `lonely` sobe quando ninguém está perto (até 160 px), e com
       isso ele chora. Também fica feliz e viaja por `burrow_to`.
   - Comum a todos:
@@ -145,15 +148,17 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     estado.
   - `toggle_sleep()` faz lie_down → sleep, e na volta wake → idle.
   - Andar cancela qualquer ação.
-- **Áreas (ilhas)**: o habitat tem duas, descritas em `scene.AREAS`. O `Game` cria um `World` por
+- **Áreas (ilhas)**: hoje só existe a ilha **lago**. A ilha da caverna foi removida a pedido do usuário,
+  junto com os arquivos dela; o código de várias áreas, viagem e caverna continua pronto. As áreas ficam
+  em `scene.AREAS`. O `Game` cria um `World` por
   área (`game.worlds`), e `game.world` é a que está na tela (`viewing`, a área do Knight).
   - Cada `Character` tem `area`. Só os personagens da área mostrada são desenhados, mas todos são
     atualizados no mundo deles.
   - Viagem: `Brain.go_area`/`enter_area` usa as saídas (`world.exits`: `at` e `arrive`). A troca de
     área tem um escurecimento (`game.fade`).
-  - **lago**: ilha com lago, banco e poste. É onde todos começam (`START_AREA`).
-  - **caverna**: ilha com lago menor e a **caverna** no fundo (`props.Cave`, arte `cave.png`). É o
-    abrigo: à noite ele dorme lá dentro (`t_sleep`) e na chuva se abriga (`t_shelter`, 70% das
+  - **lago**: ilha com lago e o banco. O poste saiu por enquanto. É onde todos começam (`START_AREA`).
+  - (removida) **caverna**: ilha com lago menor e a **caverna** no fundo (`props.Cave`, arte `cave.png`).
+    Era o abrigo: à noite ele dorme lá dentro (`t_sleep`) e na chuva se abriga (`t_shelter`, 70% das
     escolhas com `env.rain` > 0,3).
   - Para entrar: `go_into_cave` anda até a `door` e desliza (`_glide`) até `inside` de costas
     (`walk_up`); sai de frente (`walk_down`). Dentro, `in_cave` desenha o personagem escurecido.
@@ -289,6 +294,22 @@ Detalhes:
   (`_swim_to`) e volta. Na água, `_draw_water_cover` cobre as pernas com os pixels do próprio lago.
 
 Não há vista de frente nem de costas (o jogo é de plataforma).
+
+### Filha de Hallownest (`character/daughter_of_hollownest/`): `tools/make_skin.py`
+
+É uma **skin** do Knight: `Knight.png` tem a disposição exata do atlas original
+(`the_knight/Knight_full_0.png`), com a arte trocada. O sprite_def `"daughter"` é o do Knight com outro
+`frames_root` (`daughter_of_hollownest/frames/`), então novas animações do Knight valem para ela.
+- O script acha cada quadro do Knight no atlas original (8 orientações; procura uma tira de pixels nos
+  bytes do atlas e confere as cores), recorta o mesmo lugar da skin e salva com o mesmo nome de pasta.
+- O atlas tem desenhos duplicados: prefere a cópia pintada.
+- `replace_unpainted`: quadros que o autor da skin deixou quase sem pintar (similaridade > 0,6 com o Knight:
+  `walk` 0, `walk_map` 0–1, `slash_left_longer` 1, `sit` 4) repetem o vizinho.
+- `fill_gaps`: quadro sem par repete o vizinho (`collect_normal` 12, `double_jump_v2` 1, `death_anim` 5).
+- Efeitos semitransparentes sem par (`_ effects`) usam o original do Knight (são brilhos brancos). A pasta
+  `_ unnamed` não é gerada.
+- Os outros PNGs da pasta (`Hornet`, `Quirrel`, `Hatchling`, `Unn`, `voidSpells`, `wraiths`, `Wings` etc.) são
+  de outros personagens ou efeitos da mesma skin e não são usados.
 
 ### Hornet (`character/Hornet/`)
 

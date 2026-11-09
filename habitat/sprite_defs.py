@@ -186,3 +186,11 @@ CHARACTER_SPRITES = {
         },
     },
 }
+
+# A Filha de Hallownest é uma skin do Knight: mesmas animações e mesmas pastas, com os
+# quadros gerados por tools/make_skin.py em daughter_of_hollownest/frames/.
+CHARACTER_SPRITES["daughter"] = {
+    **CHARACTER_SPRITES["knight"],
+    "frames_root": "character/daughter_of_hollownest/frames",
+    "speed": 165,              # um pouco mais calma que o Knight
+}

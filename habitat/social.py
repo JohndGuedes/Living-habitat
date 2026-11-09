@@ -47,6 +47,30 @@ SCRIPTS = {
     ],
 }
 
+SCRIPTS.update({
+    ("knight", "daughter"): [
+        [("b", "olá, pequeno andarilho.", None), ("a", "oi!", None), ("b", "já comeu hoje?", None),
+         ("a", "hm-hm", None), ("b", "que bom.", None)],
+        [("a", "*acena*", None), ("b", "*acena de volta*", None), ("a", "upa!", "jump"), ("b", "hihi", "jump")],
+        [("b", "você conhece Hallownest?", None), ("a", "...", None), ("b", "eu também não reconheço mais.", None)],
+        [("a", "olha!", "cast"), ("b", "que bonito.", "cast"), ("a", "hihi", None)],
+        [("b", "treina comigo?", None), ("a", "!", None), ("a", "hyah!", "attack1"), ("b", "hah!", "attack2"),
+         ("a", "tá!", "attack"), ("b", "nada mal.", None)],
+        [("a", "*mostra o mapa*", None), ("b", "ah, este lago eu já anotei.", None), ("a", "...", None),
+         ("b", "podemos comparar depois.", None)],
+        [("b", "colhi uma flor para você.", "eat"), ("a", "!!", "jump"), ("b", "de nada.", None)],
+    ],
+    ("hornet", "daughter"): [
+        [("a", "Hm. Você de novo.", None), ("b", "olá, irmã.", None), ("a", "...Não me chame assim.", None),
+         ("b", "como quiser.", None)],
+        [("b", "ainda vigiando?", None), ("a", "Sempre.", None), ("b", "descanse um pouco.", None), ("a", "Hmph.", None)],
+    ],
+    ("daughter", "grub"): [
+        [("a", "olá, pequenino.", None), ("b", "moça bonita!", "happy"), ("a", "hihi", None)],
+        [("b", "você tem coroa?", None), ("a", "tinha...", None), ("b", "eu faço uma!", "happy")],
+    ],
+})
+
 # Conversas no banco (a = Knight, b = Hornet), quando os dois estão sentados
 BENCH_SCRIPTS = [
     [("b", "...", None), ("a", "...", None), ("b", "Bonito, daqui.", None), ("a", "hm-hm", None)],
@@ -62,6 +86,17 @@ BENCH_NIGHT_SCRIPTS = [
     [("a", "olha as estrelas", None), ("b", "...São bonitas.", None), ("a", "hm-hm", None)],
     [("b", "A noite aqui é calma.", None), ("a", "*boceja*", None), ("b", "Durma, se quiser.", None)],
 ]
+# Conversas no banco com a Filha (a = Knight, b = Filha)
+BENCH_DAUGHTER_SCRIPTS = [
+    [("b", "...", None), ("a", "...", None), ("b", "é bom não estar sozinha.", None), ("a", "hm-hm", None)],
+    [("a", "*balança as pernas*", None), ("b", "hihi", None), ("b", "*balança também*", None)],
+    [("b", "de onde você veio?", None), ("a", "*aponta para longe*", None), ("b", "longe... eu também.", None)],
+    [("a", "*mostra o mapa*", None), ("b", "que traço bonito.", None), ("a", "!", None)],
+]
+BENCH_DAUGHTER_NIGHT = [
+    [("a", "olha as estrelas", None), ("b", "em casa não dava para ver.", None), ("a", "...", None)],
+    [("b", "sua lanterna é bonita.", None), ("a", "*mostra*", None), ("b", "obrigada por ficar.", None)],
+]
 BENCH_COOLDOWN = 360     # segundos entre conversas de banco
 
 # Quando o Grub está chorando há um tempo, alguém vai consolá-lo
@@ -70,6 +105,8 @@ COMFORT = {
                ("b", "obrigado!", "happy")],
     "hornet": [("a", "Não chore.", None), ("b", "*snif*... tá", None), ("a", "Hm.", None),
                ("b", "hihi", "happy")],
+    "daughter": [("a", "shh, estou aqui.", None), ("b", "*snif*", None), ("a", "*acaricia*", None),
+                 ("b", "hihi!", "happy")],
 }
 
 CHECK_EVERY = (25, 45)   # segundos entre tentativas de encontro
@@ -118,7 +155,7 @@ class Society:
         grub = self.m.get("grub")
         # prioridade: Grub chorando -> alguém consola
         if grub and grub.state == "cry" and grub.brain.manual <= 0                 and self.t - self.last_met.get("consolo", -1e9) > COMFORT_COOLDOWN:
-            helpers = [k for k in ("knight", "hornet") if k in free]
+            helpers = [k for k in COMFORT if k in free]
             if helpers:
                 k = self.rng.choice(helpers)
                 self.last_met["consolo"] = self.t
@@ -136,21 +173,28 @@ class Society:
 
     # ---------- banco ----------
     def _maybe_bench(self, free) -> bool:
-        """Knight e Hornet no banco: um sentado chama o outro; à tarde/noite os
-        dois às vezes vão juntos. Com os dois sentados, conversam."""
-        k, h = self.m.get("knight"), self.m.get("hornet")
-        if not (k and h and self.world.benches) or self.t - self.last_met.get("banco", -1e9) < BENCH_COOLDOWN:
+        """Knight e outra (Hornet ou Filha) no banco: um sentado chama o outro; à
+        tarde/noite os dois às vezes vão juntos. Com os dois sentados, conversam."""
+        partners = [p for p in ("daughter", "hornet") if p in self.m]
+        k = self.m.get("knight")
+        if not partners or not k or not self.world.benches:
+            return False
+        # quem já está sentada tem a preferência
+        partners.sort(key=lambda p: not self.m[p].seated_on)
+        partner = partners[0] if self.m[partners[0]].seated_on else self.rng.choice(partners)
+        h = self.m[partner]
+        if self.t - self.last_met.get("banco", -1e9) < BENCH_COOLDOWN:
             return False
         seated = {c for c in (k, h) if c.seated_on}
         evening = k.brain.env.phase in ("Tarde", "Entardecer", "Noite")
         if len(seated) == 1:
             other = h if k in seated else k
-            key = "knight" if other is k else "hornet"
+            key = "knight" if other is k else partner
             if key in free and self.rng.random() < 0.4:
                 other.brain.force("banco", other.brain.t_bench(stay=self.rng.uniform(40, 70)))
                 self._bench_scene(k, h)
                 return True
-        elif not seated and "knight" in free and "hornet" in free and evening and self.rng.random() < 0.2:
+        elif not seated and "knight" in free and partner in free and evening and self.rng.random() < 0.2:
             for c in (k, h):
                 c.brain.force("banco", c.brain.t_bench(stay=self.rng.uniform(50, 80)))
             self._bench_scene(k, h)
@@ -159,9 +203,13 @@ class Society:
 
     def _bench_scene(self, k, h):
         self.last_met["banco"] = self.t
-        self.current = "banco: knight + hornet"
+        self.current = f"banco: knight + {h.name.lower()}"
         night = k.brain.env.phase == "Noite"
-        script = self.rng.choice(BENCH_SCRIPTS + (BENCH_NIGHT_SCRIPTS * 2 if night else []))
+        if h is self.m.get("daughter"):
+            pool = BENCH_DAUGHTER_SCRIPTS + (BENCH_DAUGHTER_NIGHT * 2 if night else [])
+        else:
+            pool = BENCH_SCRIPTS + (BENCH_NIGHT_SCRIPTS * 2 if night else [])
+        script = self.rng.choice(pool)
         self.director = self._bench_direct(k, h, script)
 
     def _bench_direct(self, k, h, script):

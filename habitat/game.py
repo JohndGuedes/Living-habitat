@@ -4,7 +4,7 @@ import logging
 import pygame
 
 from .apparition import Shade
-from .brain import Brain, GrubBrain, HornetBrain
+from .brain import Brain, DaughterBrain, GrubBrain, HornetBrain
 from .character import Character, read_axis
 from .config import CHARACTER, DEBUG, FPS, HEIGHT, RESIDENTS, SHADE_ENABLED, TITLE, WIDTH
 from .environment import Environment
@@ -35,7 +35,7 @@ class Game:
         start = self.worlds[START_AREA]
         # Moradores (config.RESIDENTS): o Knight (que o teclado controla) e quem mais
         # estiver na lista. Cada um tem sua rotina (brain.py) e eles se encontram (social.py).
-        brains = {"knight": Brain, "hornet": HornetBrain, "grub": GrubBrain}
+        brains = {"knight": Brain, "hornet": HornetBrain, "grub": GrubBrain, "daughter": DaughterBrain}
         self.members = {}
         for key in dict.fromkeys((CHARACTER,) + tuple(RESIDENTS)):
             sd = CHARACTER_SPRITES[key]
@@ -109,6 +109,8 @@ class Game:
                     step = 1 if event.key == pygame.K_n else -1
                     self.anim_index = (self.anim_index + step) % len(self.anim_names)
                     self.play_test(self.anim_names[self.anim_index])
+                elif event.key == pygame.K_TAB:    # troca quem o teclado controla
+                    self.switch_control()
                 elif event.key == pygame.K_c:      # ir para a outra ilha (teste)
                     self.brain.take_manual()
                     others = [n for n in self.worlds if n != self.character.area]
@@ -121,6 +123,21 @@ class Game:
                     else:
                         self.brain.manual = 0
                     self.show("rotina " + ("LIGADA" if self.routine_on else "DESLIGADA (fica parado)"))
+
+    def switch_control(self):
+        """Tab: o teclado e as teclas de teste passam para o próximo morador que tenha
+        as animações (o anterior volta para a própria rotina)."""
+        ok = [c for c in self.characters if c.locomotion == "walk"]
+        if len(ok) < 2:
+            return
+        self.brain.manual = 0
+        self.character.pinned = False
+        self.character = ok[(ok.index(self.character) + 1) % len(ok)]
+        self.brain = self.character.brain
+        self.anim_names = list(self.character.sheets)
+        self.anim_index = 0
+        self.routine_on = True
+        self.show(f"controlando: {self.character.name}")
 
     def play_test(self, name):
         """Toca uma animação do Knight para conferir o sprite."""
@@ -266,7 +283,7 @@ class Game:
                                        + ("" if self.shade.eligible() else " (só noite/chuva)")))
         lines.append("Z dormir  E comer  Espaco pular  F atacar")
         lines.append("N/B animação seguinte/anterior  M rotina " + ("on" if self.routine_on else "OFF")
-                     + "  C outra ilha")
+                     + ("  C outra ilha" if len(self.worlds) > 1 else "") + "  Tab trocar personagem")
         lines.append("T hora (auto/dia/tarde/noite)  R chuva (auto/sim/nao)"
                      + ("  G chamar a Sombra" if self.shade else ""))
 

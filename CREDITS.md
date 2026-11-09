@@ -7,6 +7,8 @@
   "Hornet needolin" (tocando a agulha).
 - **Sombra (Shade)**, **banco** (`items/town_bench_lit.png`) e **poste** (`items/cliffs_lamp.png`):
   arte de **Hollow Knight**.
+- **Filha de Hallownest**: skin do Knight fornecida pelo usuário
+  (`assets/sprites/character/daughter_of_hollownest/`), sobre a arte de **Hollow Knight**.
 - **Grub**: folha "Hollow Knight — Non-Playable Characters — Grub" (The Spriters Resource),
   em `assets/sprites/character/Grup/`.
 

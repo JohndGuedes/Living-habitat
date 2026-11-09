@@ -1028,6 +1028,149 @@ class HornetBrain(Brain):
 
 
 # ==========================================================================
+# FILHA DE HALLOWNEST — calma, nobre e nostálgica. Mesmas animações do Knight (é uma
+# skin dele), mas outra vida: passeia devagar, colhe flores, lê o mapa, olha o céu,
+# senta no banco, observa o Knight de longe e quase nunca treina.
+DAUGHTER_LINES = {
+    "greet":      ["olá, pequeno.", "ah... você.", "que bom te ver.", "sim?", "*inclina a cabeça*"],
+    "bored":      ["o tempo passa devagar aqui.", "hmm...", "...", "o que fazer?"],
+    "wander":     ["vou caminhar um pouco.", "por aqui...", "este caminho é bonito.", "devagar..."],
+    "idle":       ["...", "que silêncio.", "*suspira*", "Hallownest ainda respira.", "tão quieto..."],
+    "sleepy":     ["estou cansada...", "*boceja*", "preciso descansar.", "meus olhos pesam."],
+    "sleeping":   ["zz...", "...", "hm...", "*sonha*"],
+    "wake_day":   ["bom dia.", "que luz bonita.", "dormi bem.", "um novo dia."],
+    "wake_nap":   ["acho que cochilei.", "hm... melhor.", "*espreguiça*"],
+    "wake_night": ["ainda é noite...", "que sonho estranho.", "*boceja*"],
+    "thirsty":    ["sede...", "vou até a água.", "um pouco de água."],
+    "drink":      ["fresca.", "que delícia.", "ah, melhor."],
+    "hungry":     ["estou com fome.", "aquelas flores parecem boas."],
+    "eat":        ["doce.", "hm, gostoso.", "que perfume."],
+    "train":      ["só um pouco.", "ainda lembro como.", "hah!"],
+    "jump":       ["upa!", "hihi", "leve!"],
+    "look_up":    ["que céu...", "as nuvens vão tão longe.", "o que há lá em cima?"],
+    "stars":      ["as estrelas...", "pareciam mais perto em casa.", "tantas luzes."],
+    "pond":       ["meu reflexo...", "que água calma.", "*olha a água*"],
+    "rain_start": ["chuva...", "lá vem ela.", "gosto do som."],
+    "rain":       ["que chuva bonita.", "plic, plic...", "molhou minha capa."],
+    "thunder":    ["ah!", "que susto.", "trovão..."],
+    "hot":        ["que calor.", "{temp} graus...", "{city} está quente."],
+    "night":      ["a noite chegou.", "tão escuro...", "minha lanterna ajuda."],
+    "evening":    ["o dia se despede.", "que cor linda."],
+    "morning":    ["bom dia, ilha.", "o sol voltou."],
+    "bench":      ["um bom lugar.", "vou sentar um pouco.", "ahh...", "daqui se vê tudo."],
+    "bench_night": ["noite calma.", "que silêncio bom.", "as estrelas..."],
+    "shade_see":  ["uma sombra...", "quem é você?", "..."],
+    "shade_ask":  ["não tenha medo.", "você se perdeu?", "..."],
+    "shade_gone": ["foi embora...", "pobre alma."],
+    "listen":     ["que melodia...", "*fecha os olhos*", "lembra casa.", "shhh."],
+    "listen_end": ["lindo.", "*aplaude*", "obrigada."],
+    "wind":       ["sente o vento?", "*abre a capa*", "o vento conta histórias."],
+    "map":        ["deixa eu anotar.", "este lugar não está no mapa.", "*desenha*"],
+    "map_walk":   ["segundo o mapa...", "por aqui, acho.", "hmm..."],
+    "special":    ["agora!", "hah!"],
+    "swim":       ["um banho faz bem.", "a água está tão clara.", "vou nadar um pouco."],
+    "swimming":   ["que paz.", "*boia*", "fresquinha."],
+    "swim_out":   ["que bom.", "*sacode a capa*"],
+    "flower":     ["uma flor bonita.", "para a coroa.", "que brilho...", "vou guardar esta."],
+    "remember":   ["casa...", "tudo mudou.", "pai...", "eu me lembro.", "quanto tempo..."],
+    "watch":      ["o que será que ele faz?", "pequeno andarilho...", "*observa*", "ele não para."],
+    "dance":      ["*gira*", "hihi", "lá lá lá..."],
+}
+
+
+class DaughterBrain(Brain):
+    LINES = DAUGHTER_LINES
+    SOCIAL_OK = Brain.SOCIAL_OK + ("colher flores", "lembrar", "observar", "dançar", "sentir o vento")
+
+    def choose(self):
+        night = self.env.phase == "Noite"
+        if self.energy < SLEEP_THRESHOLD or (night and self.energy < NIGHT_SLEEP_THRESHOLD):
+            return "dormir", self.t_sleep(night)
+        if self.thirst > NEED_THRESHOLD and self.world.shore:
+            return "beber", self.t_drink()
+        if self.hunger > NEED_THRESHOLD and self._food():
+            return "comer", self.t_eat()
+        knight = next((o for o in self.others if o.area == self.c.area and o.name == "Knight"), None)
+        options = [
+            ("passear", self.t_wander, 28 + 15 * self.boredom),
+            ("parado", self.t_idle, 16),
+            ("colher flores", self.t_flowers, 12 if self._food() else 0),
+            ("lembrar", self.t_remember, 10),
+            ("olhar o céu", self.t_look_up, 10 + (10 if night else 0)),
+            ("ver o lago", self.t_visit_pond, 10 if self.world.shore else 0),
+            ("banco", self.t_bench, self.bench_weight() * 2),
+            ("sentir o vento", self.t_wind, self.wind_weight() * 2),
+            ("nadar", self.t_swim, self.swim_weight()),
+            ("dançar", self.t_dance, 3 + 8 * self.boredom),
+            ("observar", self.t_watch, 8 if knight is not None else 0),
+            ("treinar", self.t_train, 2),
+        ]
+        if self.thirst > 0.45 and self.world.shore:
+            options.append(("beber", self.t_drink, 20))
+        if self.hunger > 0.45 and self._food():
+            options.append(("comer", self.t_eat, 20))
+        names, fns, weights = zip(*options)
+        i = self.rng.choices(range(len(fns)), weights=weights)[0]
+        return names[i], fns[i]()
+
+    def t_flowers(self):
+        """Visita algumas flores por perto e colhe."""
+        foods = sorted(self._food(), key=lambda d: (d.x - self.c.x) ** 2 + (d.y - self.c.y) ** 2)
+        picks = self.rng.sample(foods[:8], k=min(len(foods[:8]), self.rng.randint(1, 3)))
+        for plant in picks:
+            first = self.rng.choice((-1, 1))
+            spot = None
+            for side in (first, -first):
+                p = (plant.x + side * 34, plant.y + 2)
+                if not self.world.blocked(self.c.feet_rect(*p)):
+                    spot = p
+                    break
+            if spot is None:
+                continue
+            yield from self.walk_to(spot, run=False)
+            if math.hypot(spot[0] - self.c.x, spot[1] - self.c.y) > 20:
+                continue
+            self.face("left" if plant.x < self.c.x else "right")
+            self.say("flower", 0.6)
+            yield from self.play("eat")
+            yield from self.wait(self.rng.uniform(0.8, 2.0))
+        self.boredom = max(0.0, self.boredom - 0.3)
+
+    def t_remember(self):
+        """Para, olha para baixo e se lembra de casa."""
+        self.say("remember", 0.8)
+        yield from self.play("look_down", hold=self.rng.uniform(4, 8))
+        self.boredom = max(0.0, self.boredom - 0.1)
+        yield from self.wait(1)
+
+    def t_dance(self):
+        """Giro e pulinhos, quando está de bom humor."""
+        self.say("dance", 0.8)
+        for _ in range(self.rng.randint(2, 3)):
+            self.face("left" if self.c.facing == "right" else "right")
+            yield from self.play(self.rng.choice(("cast", "jump", "double_jump")))
+            yield from self.wait(self.rng.uniform(0.2, 0.6))
+        self.boredom = max(0.0, self.boredom - 0.4)
+        yield from self.wait(1)
+
+    def t_watch(self):
+        """Chega a uma distância educada do Knight e fica olhando o que ele faz."""
+        knight = next((o for o in self.others if o.area == self.c.area and o.name == "Knight"), None)
+        if knight is None:
+            return
+        side = 1 if self.c.x > knight.x else -1
+        spot = self.world.nav_point((knight.x + side * 170, knight.y + self.rng.uniform(-30, 30)))
+        yield from self.walk_to(spot, run=False)
+        self.say("watch", 0.6)
+        t, until = 0.0, self.rng.uniform(6, 14)
+        while t < until:
+            self.face("right" if knight.x > self.c.x else "left")
+            yield
+            t += self.dt
+        self.boredom = max(0.0, self.boredom - 0.2)
+
+
+# ==========================================================================
 # GRUB — fofo, carente. Não anda: se enterra e brota em outro lugar.
 GRUB_LINES = {
     "greet":      ["oi!!", "eba!", "hihi", "amigo!", "*grub grub*"],
