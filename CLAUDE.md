@@ -22,16 +22,22 @@ Moradores possíveis: **Knight** (controlável pelo teclado), **Filha de Hallown
 (`brain.py`) e eles se encontram e interagem (`social.py`). O Knight vive sozinho pela **rotina**. Usar o teclado assume o controle e a rotina volta
 8 s depois da última tecla. Clicar nele sem arrastar faz ele responder (cutucão).
 
-Teclas: WASD/setas para mover; **Z** para dormir/acordar, **E** para comer, **Espaço** para pular e
+Teclas: WASD/setas para mover; **E** para a ação de contexto (veja `actions.py`); **Z** para
+dormir/acordar, **Espaço** para pular e
 **F** para atacar (teclas de teste dos sprites); **T** para alternar a hora (auto/dia/tarde/noite) e
 **R** para alternar a chuva (auto/sim/não), para testar o ambiente; **P** para o overlay de debug, que
 também mostra as áreas sólidas; Esc para sair.
+
+Música (`audio.py`): **U** liga/desliga o mudo; **-** e **+** mudam o volume. Na barra da janela há um
+botão de som: clicar põe no mudo, e a roda do mouse em cima dele muda o volume.
 
 Teste de sprites (`Game.play_test`):
 - **N**/**B**: toca a animação seguinte/anterior do Knight, com o nome no topo (`show`/`draw_flash`).
   Andar e correr ficam no lugar (`Character.pinned`) até uma tecla de movimento.
 - **M**: liga e desliga a rotina. Desligada, ele fica parado esperando as teclas.
 - **Tab**: troca quem o teclado e as teclas de teste controlam (`Game.switch_control`).
+- **V**: estação (automática → natal → normal), via `Game.set_season`, que recria as áreas.
+- **O**: editor de cenário (`editor.py`), detalhado abaixo.
 - **C**: vai para a outra ilha na hora. Andar com o teclado até uma saída também faz a viagem.
 
 Janela (popup para deixar num canto do monitor observando):
@@ -39,12 +45,13 @@ Janela (popup para deixar num canto do monitor observando):
 - **F3**: sem borda.
 - **F4**: transparência (100/85/70/55%).
 - **F11**: tela cheia.
-- **Roda do mouse**: tamanho.
+- **Roda do mouse**: tamanho (em cima do botão de som: volume da música).
 - **Arrastar com o botão esquerdo**: mover.
 
 A barra de botões aparece ao passar o mouse.
 
-Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVER=dummy`, crie
+Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVER=dummy` (e
+`SDL_AUDIODRIVER=dummy`, para a música não tocar de verdade), crie
 `Game(online=False)` (sem rede; ou `online=True` para buscar o clima real), chame `game.step(dt)` ou `game.character.update(dt, teclas, game.world)` e salve
 `game.screen` com `pygame.image.save`. `step()` fica separado de `run()` justamente para isso.
 
@@ -83,7 +90,14 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
   - **Tarefas são geradores** (`t_*`, onde cada `yield` é um quadro), montados com `walk_to` (segue
     `world.find_path` e desiste se ficar preso), `play(anim, hold=)`, `wait` e `face`.
   - Beber: vai a um ponto de `world.shore`, vira para a água, faz `look_down` e depois `eat` duas vezes.
-  - Comer: vai ao lado de uma flor ou arbusto pequeno, `eat`, e a planta se agita.
+  - Comer (`t_eat`; `_can_eat` diz se há comida): com **árvores de frutas** na área, ou fruta no
+    chão, usa `t_eat_fruit`:
+    - pega uma fruta caída (`world.fruits`, com `claimed` para dois não irem na mesma);
+    - se não houver, vai ao lado do tronco, dá um golpe (`attack`) e chama `tree.hit` (a fruta cai);
+    - espera a fruta aterrissar, vai até ela, faz `eat` (abaixar e pegar) e come: fome −0,6.
+
+    Sem árvore, vai ao lado de uma flor ou arbusto pequeno (`_t_eat_plant`), `eat`, e a planta se
+    agita.
   - Dormir: `toggle_sleep` (lie_down → sleep) com "zZz" periódico. À noite dorme 5–10 min e acorda ao
     amanhecer; de dia tira sonecas de 1–2,5 min.
   - Falas: o dicionário `LINES` (grupos de frases, com `{temp}`/`{city}` vindos do clima real) é
@@ -97,6 +111,9 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     - `DaughterBrain`: falas próprias (`DAUGHTER_LINES`), calma e nostálgica. Colhe flores
       (`t_flowers`), lembra de casa (`t_remember`), dança (`t_dance`), observa o Knight de longe
       (`t_watch`), senta mais no banco e quase não treina.
+    - `HollowBrain`: falas próprias (`HOLLOW_LINES`, silencioso e solene), sem fome nem sede; caminha
+      pela ilha, vigia os outros moradores (`t_guard`), olha o céu e o lago, descansa no banco e
+      interage com os elementos do cenário.
     - `GrubBrain`: sem fome nem sede; `lonely` sobe quando ninguém está perto (até 160 px), e com
       isso ele chora. Também fica feliz e viaja por `burrow_to`.
   - Comum a todos:
@@ -156,7 +173,29 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     atualizados no mundo deles.
   - Viagem: `Brain.go_area`/`enter_area` usa as saídas (`world.exits`: `at` e `arrive`). A troca de
     área tem um escurecimento (`game.fade`).
-  - **lago**: ilha com lago e o banco. O poste saiu por enquanto. É onde todos começam (`START_AREA`).
+  - **lago**: ilha com a casinha, o lago e o banco. O poste saiu por enquanto. É onde todos começam
+    (`START_AREA`).
+  - **Estações** (`world.current_season`, `config.SEASON`/`NATAL_MONTHS`): `scene.AREAS[área]["seasons"]`
+    troca chaves da área numa estação. Em novembro e dezembro, "lago" usa outro mapa inteiro, a área
+    **natal** (`world/areas/natal/`, de `ground-natal.jpg`):
+    - dois níveis (a praça e o platô de cima) ligados por escadas;
+    - a casinha com o píer;
+    - o lago congelado;
+    - a **cachoeira** no alto.
+    Sem `seasons`, uma área ainda pode usar `ground_<estação>.png` da mesma pasta.
+  - **Pulos** (`world.jumps`, de `"jumps"` em `scene.py`): pares de pontos ligados por um pulo. No Natal, há
+    um por cima da cachoeira:
+    - `Brain.t_leap_falls` ("pular a cachoeira") anda até a ponta mais perto e faz `_hop` com o
+      `double_jump` até a outra; às vezes volta;
+    - **Espaço** perto de uma ponta faz o pulo com o personagem controlado;
+    - o debug (P) mostra os pulos em rosa.
+  - No Natal (área natal ou `ground_natal.png`) Nesse caso `world.frozen` é
+    verdadeiro:
+    - o andável vem de `walkable_frozen.png` (o gelo vira chão);
+    - `water_mask` fica vazia (sem nadar), mas `lake_mask` continua valendo para as margens (beber
+      "quebrando o gelo", fala `drink_ice`);
+    - `t_skate` ("patinar") anda por pontos do gelo (`world.ice_point`);
+    - as falas `xmas` entram no `context_chat`.
   - (removida) **caverna**: ilha com lago menor e a **caverna** no fundo (`props.Cave`, arte `cave.png`).
     Era o abrigo: à noite ele dorme lá dentro (`t_sleep`) e na chuva se abriga (`t_shelter`, 70% das
     escolhas com `env.rain` > 0,3).
@@ -179,6 +218,44 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
   - `draw_debug` (tecla P): contorno andável (ciano), lago (azul), saídas (círculo amarelo) e comida
     (pontos verdes).
   - Há ainda `shade_at` e `draw_lights` para os objetos.
+- `actions.py`: **ações de contexto** do personagem controlado (tecla **E**).
+  - `find_action` acha o que dá para fazer ali. Em ordem de prioridade:
+    - sentado: "Levantar";
+    - nadando: "Sair da água";
+    - fruta no chão: "Pegar fruta";
+    - árvore com frutas: "Bater na árvore" ("Árvore sem frutas" só avisa);
+    - assento livre: "Sentar";
+    - ponta de pulo: "Pular";
+    - beira do lago com água: "Nadar".
+  - `Prompt` desenha "[E] ação" em cima da cabeça enquanto o jogador está no controle (`manual` > 0,
+    rotina desligada ou `brain.player_task`).
+  - `do_action` vira uma tarefa `Brain.t_player(...)`: no fim, o controle volta ao jogador (`manual` =
+    `MANUAL_PAUSE`). As tarefas são `t_hit_tree`, `t_pick_fruit`, `t_sit_here` (fica sentado até
+    `stand_request` ou andar), `t_enter_water`/`t_exit_water` (na água anda-se com WASD; se a rotina
+    voltar com ele na água, `t_leave_water` o tira) e `t_leap_falls`.
+  - Sem ação por perto, E toca a animação de comer (teste de sprite).
+- `editor.py`: `Editor`, o editor de cenário (tecla **O**). Com ele ligado, os personagens ficam
+  parados (sem rotina nem encontros) e o editor recebe os eventos antes da janela
+  (`window.to_canvas` converte o mouse).
+  - Comandos:
+    - **L**: abre a biblioteca, com as miniaturas de `assets/sprites/world/library/<conjunto>/*.png`.
+      Clicar coloca o item no meio da tela; a roda rola a lista.
+    - Arrastar move o objeto; roda ou +/− mudam o tamanho; setas fazem ajuste fino (Shift = 10x).
+    - Tab passa para o próximo objeto.
+    - Delete remove o objeto selecionado.
+    - K alterna sólido/atravessável.
+    - Backspace volta o objeto ao valor de `scene.py` (só os que estão lá).
+    - Ctrl+S ou Enter salvam; O ou Esc saem.
+  - Itens da biblioteca viram `props.Item` (`kind: "item"`, `file`, `name`), com `ITEM_SCALE` inicial.
+    São sólidos por padrão: uma faixa na base com metade da largura da arte. Os que têm nome começando
+    com "banco" viram `Bench`, com `seats_rel`/`approach_rel` (frações da arte, que acompanham o
+    tamanho).
+  - Cada mudança altera `world.prop_defs` e recria o objeto (`make_prop`). Ao sair, a navegação é
+    refeita, por causa das colisões.
+  - **`layout.json`** (na raiz, versionado) é o padrão salvo: a lista COMPLETA de objetos de cada área,
+    por estação (`"lago@natal"`, `"lago@normal"`). Assim a decoração de Natal fica só no Natal.
+    `world.load_layout` usa a chave da estação; se ela não existir, usa a da área; se nenhuma existir,
+    usa `scene.py`.
 - `scene.py`: `AREAS`. Para cada área:
   - `folder`;
   - `props` (`img_pos` = **base** do objeto em px da imagem);
@@ -189,6 +266,75 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
   Também ficam lá `START_AREA` e `DECOR` por área (hoje vazio: as ilhas novas já têm plantas e
   `gramas.png` é bem mais clara). Os objetos provisórios antigos (casa, árvore, fogueira, bonecos)
   continuam em `props.py`, mas só voltam quando o usuário pedir.
+- `effects.py`: efeitos animados do cenário (`"effects"` em `scene.py`, criados por `make_effect`).
+  `world.draw` os desenha logo depois do chão, então objetos e personagens passam na frente; à noite
+  escurecem junto com a luz. Há dois tipos: `PlantSway` (abaixo) e `Waterfall`, a água da cachoeira
+  do mapa de Natal, em três partes:
+  - a cascata de cima, com respingos;
+  - o riacho na diagonal (`dir`);
+  - a queda principal, com respingos e névoa (`mist`).
+
+  Como funciona:
+  - a camada de água é a própria arte (pixels claros e azulados do `rect`) deslocada sem parar na
+    direção do fluxo, em 4 cópias que se emendam, e misturada por cima (`FLOW_ALPHA`), com as bordas
+    esmaecidas;
+  - riscos de luz (`STREAKS`) escorrem mais rápido;
+  - no `splash` saem gotinhas com gravidade e baforadas de névoa;
+  - custa cerca de 1 ms por quadro.
+
+  `PlantSway` (`"kind": "sway"`): as **plantas pintadas no chão** (samambaias, capim de gelo,
+  florzinhas) balançam bem de leve.
+  - `"plants"`: caixas `(x0, y0, x1, y1)` em px da imagem do chão, marcadas à mão nos dois mapas. O
+    `y1` é a base (fica parada). As caixas estão em `scene.py`: o `lago` normal tem 17 e o Natal tem 23.
+  - Cada caixa vira um recorte da própria arte, inclinado em `POSES` posições com fração de pixel
+    (`decor.soft_sway_poses`: amplia sem suavizar, cisalha e reduz com suavização, então a pose parada
+    é idêntica ao chão). Uma margem `PAD` em volta é esmaecida, para não ter emenda.
+  - Cada planta tem ritmo próprio (`decor.breeze`); a chuva (`world.wind`) balança mais, e um
+    personagem andando por dentro (`world.actors`) agita a planta.
+  - Uma planta nova no mapa precisa da caixa dela em `scene.py`.
+- `lighting.py`: **iluminação, sombras e reflexos**.
+  - **Luzes** (`SceneLights`, de `"lighting"` em `scene.py`, criadas pelo `World` e desenhadas em
+    `world.draw_lights`, depois do escurecimento, com luz aditiva). São fortes à noite e fracas de dia:
+    - todos os brilhos são **difusos**: `_glow` usa queda gaussiana calculada pequena e ampliada com
+      suavização (sem anéis). O usuário não quer luz "circular marcada";
+    - `warm`: luz quente com tremulação. Com `pos`/`radius`, é um brilho difuso (lanternas do píer,
+      estrela). Com `kind: "opening"` + `rect` + `spill` (dx, dy, comprimento, abertura) + `edge` (direção da base da parede: a ilha é isométrica,
+      então a soleira é diagonal e a luz sai perpendicular a ela), é luz vindo
+      **de dentro** por uma abertura (`_opening_light`, no Natal a porta e a janela): a abertura
+      inteira brilha, há um halo suave em volta e um leque de luz no chão à frente, que esmaece e é
+      desfocado (`_blur`);
+    - `strings`: fios de pisca-pisca que seguem os desenhados na arte, com uma lâmpada a cada
+      `BULB_GAP` px, cores alternadas (`BULB_COLORS`) e piscando cada uma no seu ritmo. Foram marcados
+      à mão, porque as lâmpadas da arte são pequenas demais para achar sozinho;
+    - `sheen`: uma faixa de brilho deslizando sobre o lago (recortada por `world.lake_surface`).
+  - **Sombras do sol**: `Environment.sun()` dá (lado, comprimento, força). Sem sol à noite; mais
+    fracas com chuva. `Game.draw_shadows_and_reflections` desenha, no chão, a silhueta de objetos e
+    personagens (`Character.pose`, `SpriteSheet.frame_image`) achatada e cisalhada por
+    `cast_shadow` (com cache). De manhã a sombra vai para a esquerda e no fim da tarde para a direita,
+    e fica comprida perto do nascer e do pôr do sol. Quem pula tem a sombra mais fraca.
+  - **Reflexos**: quem está sobre o lago (`world.on_lake`) aparece de cabeça para baixo debaixo dos
+    pés (`reflect`), levemente azulado, recortado pela forma do lago. O reflexo se afasta quando o
+    personagem pula.
+- `fairies.py`: **fadinhas**, personagens de fundo. A arte é `world/fairies/fadinhas.png`: 8 quadros
+  batendo as asas, em células com moldura azul. Por dentro a folha já é transparente, com a fadinha
+  branca e o halo em alpha; é preciso carregar com `convert_alpha`, porque com `convert` vira um disco
+  branco. `_load_frames` recorta as células.
+  - Pequenas (`scale` 0,3 em `scene.py`). Grupinhos (`Swarm`) de 3 a 6 fadinhas (`Fairy`), cada uma
+    com posição e velocidade próprias, puxada por uma mola até o seu lugar no grupo.
+  - Passam a maior parte do tempo paradas: `rest` por `REST` (20–60 s), em 75% das vezes sentadas num
+    objeto (`_perches`: copa das árvores, encosto do banco, em cima das lanternas dos itens, cabeça do
+    Zote, topo de outros itens), cada uma num cantinho dele, com as asas mais lentas
+    (`REST_FRAME_TIME`); senão pairando no ar. Depois voam (`fly`) devagar para outro lugar, por cima de
+    tudo (não usam a navegação).
+  - Alguém a menos de `SCARE` px faz a fadinha **debandar** (impulso para longe por `SCATTER` s); depois
+    ela volta e o grupo se reúne.
+  - **Curiosa**: `Fairies.still` conta quanto tempo cada personagem está parado. Depois de
+    `CURIOUS_AFTER` s, com um grupo a menos de `CURIOUS_RANGE` px, às vezes uma fadinha vai rodear a
+    cabeça dele (`visit`) por 5–10 s; se ele se mexer, ela foge e volta para o grupo.
+  - `Fairies` (de `"fairies"` em `scene.py`: `swarms`, `size`, `scale`) é criado pelo `World`.
+    `Game` desenha as fadinhas depois de todos os objetos (voam por cima) e antes da luz.
+    `world.draw_lights` → `draw_light` acrescenta um brilho azulado, quase nada de dia e mais forte à
+    noite (com cache por força).
 - `decor.py`: **plantas animadas** espalhadas pela grama, usando a arte `world/gramas/gramas.png`.
   - Os desenhos são achados com `mask.get_bounding_rects` e agrupados em linhas; `SETS` mapeia
     `tipo -> (linha, início, fim)`.
@@ -205,12 +351,55 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
   tipos:
   - `House`
   - `Tree`: sombra no chão que escurece o personagem; a copa fica transparente quando ele está atrás
-  - `Campfire`: chamas animadas, faíscas e brilho aditivo
+  - `Campfire` (`kind: "campfire"`): **fogueira interativa** recortada de `world/natal/fogueira.png` por
+    **`tools/make_campfire.py`** para `world/campfire/` (`unlit_snow`, `extinguished`, `kindling`,
+    `fire_0..4`, mais `flame`, `smoke_0..2` e `spark_0..3`), com miniatura `library/natal/fogueira.png` (e
+    itens extras `lenha_neve.png` e `espeto_fogueira.png`).
+    - Acesa (`lit = True`): anima `fire_0..3` em loop, solta fagulhas (`spark_*`), línguas de fogo (`flame`)
+      e fumaça (`smoke_*`), e ilumina o redor com brilho difuso quente que oscila como fogo real.
+    - Apagada (`lit = False`): ao apagar (`extinguish`) passa por `fire_4`, solta fumaça e fica em
+      `extinguished` (no Natal, depois de um tempo apagada, acumula neve `unlit_snow`); ao acender
+      (`light_up`) passa por `kindling` derretendo a neve das pedras.
+    - Perto dela, a tecla **E** mostra **"Apagar fogueira"** ou **"Acender fogueira"**
+      (`Brain.t_toggle_campfire`), e na rotina (`Brain.t_campfire`) os moradores vão acendê-la e se aquecer.
   - `Dummy`: balança como mola amortecida e pisca ao levar golpe
   - `Bench`: tem `seats` (dx), `occupied`, `seat_pos`, `approach` (onde parar antes de sentar, fora da
     área sólida) e `seat_height`.
+  - `ZoteDummy` (`kind: "zote"`): o **boneco de treino** (o Zote). É colocado pelo editor; na
+    biblioteca é `boneco_zote`. Usa a arte de `world/zote/`.
+    - Cada `hit`:
+      - pisca branco;
+      - toca `hit_0..4`;
+      - solta lascas, madeira e neve com gravidade (quicam no chão);
+      - mostra uma faísca no impacto e às vezes um balão de emoção.
+    - Tem `MAX_HP` (10) de vida: com 6 ou menos fica rasgado (`damaged`); com 3 ou menos, com a base
+      quebrada (`nobase`).
+    - Na vida zero, quebra (`_break`): a cabeça voa e fica no chão, o corpo sem cabeça tomba e some,
+      sobra a `base`.
+    - Depois de `RESPAWN` s, sobe uma fumaça e ele volta inteiro, resmungando.
+    - Só o poste é sólido. A rotina treina nele (`t_train` → `t_train_dummy`, 75% das vezes quando
+      existe); **E** perto dele: "Treinar"; **F** também bate.
+  - `FruitTree` (`kind: "fruit_tree"`): a comida. É colocada pelo editor; na biblioteca é
+    `arvore_frutas`, com `scale` inicial 1,2. Usa as poses de `world/fruit_tree/`. Um `hit`:
+    - pisca branca (`FLASH`) e treme;
+    - toca `hit_0..3` (neve e folhas voando), com partículas de folhas;
+    - derruba uma `Fruit`, que cai quicando até um ponto andável perto do tronco e entra em
+      `world.fruits` (desenhada por y, com sombrinha; some em 10 min se ninguém pegar).
+    Com `fruits` (padrão 4) zerado, mostra `empty` e rebrota em `REGROW` s. Só o tronco é sólido.
+    **Árvore de imagem única** (`single`, ex.: `pinheiro_enfeitado`, que não tem poses desenhadas): o
+    balanço é feito pelo código com `decor.sway_poses` (a copa inclina com a base parada, numa
+    oscilação que vai parando por `SINGLE_TIME`). `make_prop` transforma em árvore de frutas os itens
+    cujo nome começa com `FRUIT_TREE_NAMES` (`arvore_frutas`, `pinheiro`), inclusive os já salvos no
+    `layout.json`.
+    O `World` liga `prop.world`. **F** perto da árvore bate nela (`resolve_hit`); **E** perto de uma
+    fruta no chão pega e come.
   - `Lamp`: `lights` são as lâmpadas, em px da arte original relativos à base; acende com a
     escuridão e tem uma poça de luz no chão.
+  - **Brisa** (`Breeze`): os itens com nome começando em `PLANT_NAMES` (arbusto, capim, planta,
+    folhas) e todas as `FruitTree` (pinheiros e árvore de frutas, parados entre os golpes) balançam bem
+    de leve. O topo vai e volta 1–3 px e a base fica parada. As poses vêm de `decor.soft_sway_poses` e
+    ficam em cache por arte e escala; a chuva balança mais. A sombra do sol usa `shadow_image()`, a
+    imagem sem balanço, para não encher o cache de sombras.
   - Opções genéricas de prop: `"file"` (arte em qualquer lugar de `assets/sprites/`) e
     `"base_offset"` (px da arte entre a borda de baixo e o ponto que toca o chão).
   - **A arte de cada objeto é provisória**, desenhada por código (o usuário escolheu assim por
@@ -228,19 +417,32 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     quando não há dados.
   - `Environment` gera a luz ambiente (cor multiplicada, interpolada entre noite, amanhecer, dia,
     tarde, entardecer e noite, usando o sunrise/sunset reais), o `darkness` (0..1, usado pelas luzes),
-    a chuva (códigos WMO para intensidade, com gotas e respingos), relâmpagos em trovoada e o HUD no
-    canto superior direito. Os presets das teclas T/R substituem os dados reais (o HUD mostra
-    "manual").
+    a chuva (códigos WMO para intensidade, com gotas e respingos), relâmpagos em trovoada e o
+    **indicador celeste de horário** (`draw_hud`) no topo-centro da tela: um arco sutil onde o Sol (de
+    dia, mudando gradativamente de cor e brilho do amanhecer ao pôr do sol) ou a Lua (à noite, com
+    estrelinhas e a **fase astronômica real do dia** calculada em `moon_phase`/`_moon_disc`) percorrem
+    o ciclo conforme o minuto atual, sem texto de cidade, temperatura ou relógio numérico.
 - `window.py`: `PopupWindow`. O jogo desenha sempre em `Game.screen`, uma Surface interna de
   1280x720, e `present()` escala com `smoothscale`, mantendo a proporção (com tarja se precisar),
   para a janela RESIZABLE do tamanho que estiver.
   - Usa a API `pygame.Window` (pygame-ce): `always_on_top`, `borderless`, `opacity`, `position` e
     `size`. Cada mudança passa por `_try`, porque nem todo driver suporta.
-  - A barra de botões (fixar, sem borda, transparência, −, +, fechar) é desenhada no espaço da janela.
+  - A barra de botões (fixar, sem borda, transparência, −, +, som, fechar) é desenhada no espaço da
+    janela. O botão de som usa `window.music` (o `Game` liga).
   - Arrastar usa `mouse.get_pos(desktop=True)`.
   - `handle_event` roda antes dos eventos do jogo (retorna True se consumiu, "quit" para fechar).
   - O estado fica salvo em `window_state.json` (no .gitignore). O padrão é 640x360, fixado por cima.
   - Sem foco, o loop cai para 30 fps.
+- `audio.py`: **trilha sonora** (`Music`).
+  - Toca em loop a primeira música de `assets/music/` (.opus, .ogg, .mp3, .wav ou .flac), entrando
+    devagar (`FADE_IN_MS`).
+  - Volume e mudo ficam em `window_state.json` (`music_volume`, `music_muted`).
+  - O pygame não abre .weba/.webm. Se só houver um desses, `audio` converte numa thread
+    (`webm_opus.convert`, via `.opus.part`) e começa a tocar quando termina. A conversão só troca o
+    contêiner (os pacotes Opus vão do WebM para páginas Ogg), sem recodificar e sem ffmpeg. O
+    `tools/convert_music.py` faz o mesmo à mão.
+  - A música atual é `hollow-background-music` (65,8 min), fornecida pelo usuário. Os dois arquivos
+    (.weba e .opus) têm cerca de 70 MB.
 - `game.py`: eventos e teclas de teste.
   - Cria os moradores (`members`; `self.character` é o Knight, que o teclado controla), as rotinas e a
     `Society`.
@@ -367,6 +569,14 @@ para a esquerda. O sprite_def é `"shade"`.
 - Os mesmos `lie_down`/`wake` servem para viajar (`burrow_to`).
 - `home_*` não são usados (têm um degradê na base).
 
+### Hollow (`character/hollow/`): `tools/make_hollow.py`
+
+- `tools/make_hollow.py` recorta os 19 quadros de `character/hollow/walk.png` (removendo o fundo cinza
+  por flood-fill e frestas entre as pernas) e centraliza cada quadro numa tela uniforme de 120x186 pelo
+  eixo da cabeça (`ANCHOR_X = 60`, pés em `ANCHOR_Y = 183`), gerando `frames/{idle,walk,walk_down,walk_up,walk_up_side,walk_left}`.
+- `Character.anim_name()` usa `walk_down` (frente), `walk` (lados, espelhado na esquerda), `walk_up_side`
+  (diagonais para cima mostrando o manto e o ferrão nas costas) e `walk_up` (costas).
+
 ### Carregador (`assets._load_frame_folders`)
 
 - Opções por animação: `dir` ou `files`, `start`/`end`, `reverse`, `pick`, e em `per_anim` também
@@ -379,28 +589,116 @@ O usuário fornece a arte. Não gere sprites por código (ele achou feio) e não
 ficam em `CREDITS.md`. As pastas `character/charmander` e `character/froakie` são sobras da fase Pokémon
 e não são usadas.
 
+### Biblioteca de itens (`world/library/<conjunto>/`): `tools/slice_sheet.py`
+
+- O script recorta folhas de itens com fundo liso (`SHEETS`: folha → conjunto). A primeira é
+  `world/natal/assets terreno natal.png`, fornecida pelo usuário, que vira `library/natal/`.
+- Passos:
+  - tira o fundo (a cor do canto) por flood-fill a partir das bordas, com tolerância `EDGE_TOL`,
+    e também nos buracos fechados, com `HOLE_TOL`;
+  - junta os pedaços que se tocam depois de "engordados" `JOIN/2` px (a lanterna e o poste, os
+    presentes, o pisca-pisca);
+  - salva cada item recortado justo, com os nomes de `NAMES`.
+- Os 19 itens de Natal: postes (com e sem guirlanda, curvo), pilares com lanterna, estátua com lanterna,
+  pedras com neve (vários), plantas com neve, presentes, pisca-pisca, guirlandas e `banco_neve`.
+- Qualquer PNG colocado à mão numa pasta de `library/` também aparece no editor.
+- `world/natal/boneco-zote.png` (fornecida pelo usuário): **`tools/make_zote.py`** recorta as poses e as
+  alinha pela base (parado, golpe, `damaged`, `nobase`, `headless`), mais as peças soltas (cabeça,
+  base, lascas, neve, faíscas, fumaça, balões). Também gera a miniatura
+  `library/natal/boneco_zote.png`.
+- **Boneco de neve** (`props.Snowman`, `kind: "snowman"`): dois modelos (`knight` e `hornet`), recortados de
+  `world/natal/bonecos-neve.png` por **`tools/make_snowmen.py`** para `world/snowman_knight/` e
+  `world/snowman_hornet/`, com miniaturas `library/natal/boneco_neve_knight.png` e
+  `library/natal/boneco_neve_hornet.png`.
+  - Poses alinhadas pela base: `build_0..2` (etapas de montagem), `idle_0..2` (cachecol/manto ao vento),
+    `hit_0..1` (rachado / desmoronando) e `destroyed` (pilha de neve no chão), mais `piece_0..7` (bolas
+    de neve, flocos, galhos e cachecol/manto).
+  - Bater (`hit`, tecla **F** ou **E** "Quebrar boneco" -> `Brain.t_break_snowman`) tira vida (`MAX_HP = 4`),
+    solta neve/galhos, racha na metade da vida (`hit_0`) e desmonta (`hit_1` -> `destroyed`).
+  - Desmontado (`stage < 4`), **E** mostra "Montar boneco" (`Brain.t_build_snowman`), onde o personagem se
+    abaixa repetidamente (`eat`) chamando `build_step()` para avançar `destroyed -> build_0 -> build_1 ->
+    build_2 -> idle_0..2` até ficar pronto de novo. A rotina (`Brain.t_snowman`) também monta os bonecos
+    desmontados ou brinca de desmontar e remontar.
+- **Grub de Natal** (`props.GrubNatal`, `kind: "grub_natal"`): recortado de `world/natal/group-natal.png` por
+  **`tools/make_grub_natal.py`** para `world/grub_natal/` (`jar_0..5`, `hit_0..2`, `shatter_0..2`,
+  `free_0..2`, `burrow_0..2`, `broken_jar`, `lid`, `piece_0..6`), com miniatura `library/natal/grub_natal.png`.
+  - No pote (`state == "jar"`): **E** "Libertar Grub" (`Brain.t_free_grub_natal`) ou **F** dá 3 golpes que
+    racham o pote (`hit_0..2`) até quebrar em cacos (`shatter_0..2`) com a tampa (`lid`) voando.
+  - Livre (`state == "free"`): pula de alegria com gorro de Natal (`free_0..2`); **E** "Brincar com o Grub"
+    (`Brain.t_play_grub_natal`) faz ele mergulhar na neve (`burrow_0..2`).
+  - No montinho de neve (`state == "snow"`): fica só com o gorro e estrelinhas de fora (`burrow_2`); **E**
+    "Chamar o Grub" faz ele brotar de novo e reiniciar o ciclo. A rotina (`Brain.t_grub_natal`) também
+    interage com ele sozinha.
+- `menu.py`: `Menu`, tela de título transparente sobre o habitat vivo ao abrir o jogo (`"title"`) e painel
+  central de configurações (`"settings"`, tecla **Esc** ou botão `☰` na barra superior). Permite ajustar
+  modo de exibição, tamanho, opacidade, áudio, estação, hora do dia, clima e rotina da IA.
+- **Golpes**: `Game.resolve_hit(ch)` vale para qualquer personagem, no quadro do golpe (`hit_now`).
+  Acerta o que tem `hit` e está logo à frente (alcance = 26 + 35% da largura do objeto).
+- `world/natal/arvores.png` (fornecida pelo usuário) vira `library/natal_2/`: muro e pedras com neve,
+  arbustos, capim, montes e o pinheiro enfeitado. Os pedaços com nome `None` em `NAMES` ficam de fora.
+  A árvore de frutas e as cerejas são recortadas por **`tools/make_fruit_tree.py`**:
+  - as poses `full`, `hit_0..3` e `empty` são alinhadas pela base do tronco (maior sobreposição da
+    parte de baixo) numa tela comum;
+  - saem também `fruit_0..5` e a miniatura `library/natal_2/arvore_frutas.png`.
+
+  Rode o `make_fruit_tree` depois do `slice_sheet`, porque o `slice_sheet` limpa os PNGs da pasta do
+  conjunto.
+- **Luzes dos itens**: `library/<conjunto>/lights.json` diz onde ficam as luzes de cada item, em px
+  da imagem do item:
+  - `"nome": [[x, y]]`: lanternas (no Natal: os postes, os pilares, o poste curvo e a estátua).
+    `Item.draw_light` desenha um brilho difuso no vidro e uma pocinha no chão;
+  - `"bulbs": {"nome": [[x, y], ...]}`: lâmpadas de pisca-pisca, coloridas e piscando (o
+    `pisca_pisca`).
+
+  As luzes acompanham a posição e o tamanho do item. Os brilhos ficam em cache por força
+  (`Item._glows`), para não pesar. Um item novo com lanterna precisa da entrada dele nesse arquivo.
+
 ### Ilhas (`world/areas/<área>/`): `tools/make_areas.py`
 
-- As fontes ficam em `source/` e foram fornecidas pelo usuário. São duas ilhas escuras, no estilo
-  Hollow Knight, com fundo preto:
-  - `lago/source/island.png` (1672x941);
-  - `caverna/source/island_cave.png` (1536x1024), que traz a caverna no alto e setas mostrando onde
-    ela encaixa no fundo da ilha.
-- O script (`AREAS` no topo, em px da imagem) gera:
+- A ilha atual (`lago`) foi fornecida pelo usuário em duas versões alinhadas pixel a pixel (1024x572,
+  estilo Hollow Knight, com uma casinha no canto de cima):
+  - `source/ground.png`: a normal, com fundo preto;
+  - `source/Natal.jpg` (2752x1536, mesma proporção e posição, em alta resolução): neve, enfeites e lago
+    congelado, com fundo azul-escuro e estrelas.
+- O script (`AREAS` no topo, em px da imagem) gera, a partir da versão normal:
   - `ground.png` (fundo removido por flood-fill de pixels escuros a partir das bordas);
-  - `walkable.png`: grama verde-azulada ou trilha de pedra cinza; fechamento, maior região, margem;
+  - `walkable.png`: grama verde-azulada ou trilha de pedra cinza; fechamento, maior região, margem.
+    `block` tira retângulos com cor de grama que não são chão (o telhado musgoso da casinha);
   - `water.png`: o lago a partir de um ponto `lake`, porque as paredes dos barrancos têm cor
     parecida. A água tem bem mais azul que verde. Os buracos pequenos são preenchidos;
+  - `walkable_frozen.png`: andável + o lago, ligado à margem (para o Natal);
   - `meta.json`: as florzinhas brilhantes, que viram comida.
-- Na caverna:
-  - `erase` apaga as setas;
-  - `island_top` corta a ilha;
-  - `cave` é recortada por `cut_cave`: em cada coluna, tudo entre o primeiro e o último pixel do
-    desenho fica opaco, porque o interior escuro é parecido com o fundo. O resultado é `cave.png`.
+- `variants` (`natal`): `ground_natal.png`, na resolução da própria imagem, recortado pelo contorno da ilha
+  normal (3 px de folga para a neve, suavizado). O fundo com estrelas não é escuro o bastante para o
+  flood-fill. O `World` estica a variante para o mesmo tamanho da normal; as posições continuam em px de
+  `ground.png`.
+- O suporte a caverna (`erase`, `island_top`, `cave`/`cut_cave`) continua no script, sem uso.
+- **Área natal** (`ground-natal.jpg`, 2752x1536). Opções da entrada em `AREAS`:
+  - `cell` 8 e `margin` 1: as escadas são estreitas;
+  - `bg: "corner"`: o fundo é azul-escuro com estrelas;
+  - `ground: "snow"` (`is_snow`): a média clara vira chão, e paredões e rochas escuros não;
+  - `lake_test: "ice"`: o gelo é azulado e um pouco mais escuro que a neve;
+  - `frozen`;
+  - `block`: a cachoeira, branca como a neve;
+  - `allow`: a escada da direita, que uma coluna de pedra cortava;
+  - `food`: as plantinhas, marcadas à mão, porque a neve é clara demais;
+  - `clear_dark`: o halo desenhado em volta da estrela da árvore virava um disco no céu. Nesse círculo,
+    só ficam a estrela e o triângulo da árvore; o jogo põe o brilho.
+
+  A praça, o platô, as duas escadas e as duas beiras da cachoeira formam uma região só da navegação
+  (conferido).
 - `walkable.png`/`water.png` (1 célula = 4 px) podem ser retocados à mão. Rodar o script de novo
   sobrescreve tudo. Com uma pasta como argumento, salva prévias com as áreas pintadas.
-- A ilha antiga (`world/ground`, `tools/make_ground.py`) foi substituída e removida; está no histórico
-  do git.
+- As ilhas antigas (`world/ground`, `island.png`, a ilha da caverna) foram substituídas e removidas;
+  estão no histórico do git.
+- As posições em `scene.py` são em px de `ground.png` (1024x572). O banco tem `scale` 0,5 relativa à
+  ilha, `seats` ±24 e `approach_dy` 22, para o tamanho novo dos personagens.
+- **Tamanho dos personagens**: `config.CHARACTER_SCALE` (0,6, para caberem na porta da casinha)
+  multiplica:
+  - a `scale` dos sprite_defs (em `load_sprite_set`);
+  - a velocidade, a sombra, o `seat_drop`, os pés (`feet_rect`) e a altura dos pulos (`hop`);
+  - a altura do balão e a `WATERLINE`;
+  - as distâncias de corpo: comer ao lado da planta, `separate` e os pontos dos encontros.
 - Hoje os planaltos (degraus da ilha) são tratados como o mesmo nível: não há altura.
 
 ## Etapas

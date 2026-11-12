@@ -97,6 +97,15 @@ class SpriteSheet:
         t = min(1.0, time / self.duration)
         return self.hop * 4 * t * (1 - t)
 
+    def frame_image(self, frame: int, direction: str, facing: str = "right"):
+        """(imagem, ax, ay): o quadro já virado para o lado certo e onde ficam os pés nele."""
+        cells, ax = self.cells, self.anchor[0]
+        if self.art_faces:
+            side = "right" if "right" in direction else "left" if "left" in direction else facing
+            if side != self.art_faces:
+                cells, ax = self.flipped, self.fw - ax
+        return cells[self.row_for(direction)][frame], ax, self.anchor[1]
+
     def draw(self, surface: pygame.Surface, frame: int, direction: str, x: float, y: float,
              facing: str = "right", lift: float = 0, tint: float = 1.0, alpha: int = 255):
         """(x, y) = pés do personagem. `facing` = último lado horizontal, usado

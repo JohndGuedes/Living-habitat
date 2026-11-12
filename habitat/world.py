@@ -6,18 +6,60 @@ Arquivos da área (assets/sprites/world/areas/<nome>/, gerados por tools/make_ar
   water.png     o lago (onde dá para nadar);  meta.json  florzinhas (comida).
 Os mapas são esticados sobre a ilha e podem ser retocados à mão.
 """
+import datetime
 import json
 import logging
 from collections import deque
 
 import pygame
 
-from .config import SPRITES_DIR
+from .config import NATAL_MONTHS, ROOT, SEASON, SPRITES_DIR
 from .decor import scatter
+from .effects import make_effect
+from .fairies import Fairies
+from .lighting import SceneLights
 from .props import make_prop
 from .scene import AREAS, DECOR, DECOR_SCALE, DECOR_SEED, DECOR_SOLID
 
 log = logging.getLogger(__name__)
+
+# Posição/tamanho dos objetos salvos pelo editor (tecla O); valem por cima de scene.py
+LAYOUT_FILE = ROOT / "layout.json"
+
+
+def layout_key(area, season):
+    return f"{area}@{season}"
+
+
+def load_layout(area, defs, season=None):
+    """Objetos da área: o que o editor salvou em layout.json (para esta estação, ou o da
+    área sem estação), senão os de scene.py. Entradas antigas (só posição/tamanho) são
+    completadas com o objeto de mesmo tipo e posição na lista de scene.py."""
+    defs = [dict(d) for d in defs]
+    if not LAYOUT_FILE.exists():
+        return defs
+    try:
+        data = json.loads(LAYOUT_FILE.read_text(encoding="utf-8"))
+    except ValueError:
+        log.warning("layout.json inválido: usando scene.py")
+        return defs
+    saved = data.get(layout_key(area, season)) if season else None
+    if saved is None:
+        saved = data.get(area)
+    if saved is None:
+        return defs
+    out = []
+    for i, s in enumerate(saved):
+        base = defs[i] if i < len(defs) and defs[i]["kind"] == s.get("kind") else {}
+        d = {**base, **s}
+        if "img_pos" not in d or "kind" not in d:
+            continue
+        d["img_pos"] = tuple(d["img_pos"])
+        for key in ("seats", "seats_rel", "footprint"):
+            if isinstance(d.get(key), list) and key == "footprint":
+                d[key] = tuple(d[key])
+        out.append(d)
+    return out
 
 
 class FoodSpot:
@@ -31,20 +73,49 @@ SKY_TOP = (118, 168, 210)
 SKY_BOTTOM = (176, 210, 228)
 
 
+def current_season(override=None):
+    """"natal" em novembro/dezembro (ou o que estiver fixado em config.SEASON)."""
+    season = override or SEASON
+    if season:
+        return season
+    return "natal" if datetime.date.today().month in NATAL_MONTHS else "normal"
+
+
 class World:
-    def __init__(self, width: int, height: int, area: str, margin: int = 16):
+    def __init__(self, width: int, height: int, area: str, margin: int = 16, season=None):
         self.width, self.height = width, height
         self.name = area
-        self.spec = AREAS[area]
+        # época: "natal" pode trocar o mapa inteiro (scene "seasons") ou usar ground_natal.png
+        self.season = current_season(season)
+        spec = AREAS[area]
+        self.spec = {**spec, **spec.get("seasons", {}).get(self.season, {})}
         self.folder = SPRITES_DIR / self.spec["folder"]
+        self.frozen = self.season == "natal" and (self.folder / "walkable_frozen.png").exists()
         self.background = self._sky()
         self.ground, self.ground_pos, self.walk_mask = self._load_ground(margin)
-        self.water_mask = self._load_water()
-        self.props = [make_prop(self._place(d)) for d in self.spec.get("props", [])]
+        self.lake_mask = self._load_water()
+        # congelado: não dá para nadar (o lago continua sendo lago para beber na beira)
+        self.water_mask = pygame.mask.Mask(self.lake_mask.get_size()) if self.frozen else self.lake_mask
+        # objetos: scene.py, com o que o editor salvou em layout.json por cima
+        self.prop_defs = load_layout(area, self.spec.get("props", []), self.season)
+        self.props = [make_prop(self._place(d)) for d in self.prop_defs]
+        self.fruits = []             # frutas caídas das árvores (props.Fruit)
+        self.wind, self.actors = 1.0, ()   # atualizados em update (balanço das plantas)
+        for p in self.props:
+            p.world = self
         self.spawn = self.to_screen(self.spec.get("spawn", (0, 0)))
         self.spawns = {k: self.to_screen(v) for k, v in self.spec.get("spawns", {}).items()}
         # saídas para outras áreas: [{"to", "at": (x, y), "arrive": (x, y) em px da imagem de lá}]
         self.exits = [dict(e, at=self.to_screen(e["at"])) for e in self.spec.get("exits", [])]
+        # luzes (pisca-pisca, porta, lanternas...) e brilho no gelo (lighting.py)
+        self.lights = SceneLights(self, self.spec.get("lighting", {}))
+        # fadinhas voando em grupinhos (fairies.py)
+        self.fairies = Fairies(self, self.spec.get("fairies", {}))
+        self._lake_surface = None
+        # efeitos animados por cima do chão (ex.: a água da cachoeira correndo)
+        self.effects = [make_effect(self, e, seed=i) for i, e in enumerate(self.spec.get("effects", []))]
+        # pulos (ex.: por cima da cachoeira): pares de pontos de tela
+        self.jumps = [(self.to_screen(a), self.to_screen(b)) for a, b in self.spec.get("jumps", [])]
         meta = self.folder / "meta.json"
         food = json.loads(meta.read_text(encoding="utf-8")).get("food", []) if meta.exists() else []
         self.food_spots = [FoodSpot(*self.to_screen(p)) for p in food]
@@ -77,6 +148,7 @@ class World:
         """Ilha escalada para caber na tela (centralizada; "top_room" reserva espaço
         em cima, ex.: a caverna) + máscara andável."""
         path = self.folder / "ground.png"
+        variant = self.folder / f"ground_{self.season}.png"   # ex.: natal (pode ter outra resolução)
         if not path.exists():
             log.warning("sem %s — rode tools/make_areas.py. Usando chão liso.", path)
             img = pygame.Surface((self.width - 2 * margin, self.height - 2 * margin))
@@ -89,12 +161,15 @@ class World:
         room = self.spec.get("top_room", 0)
         k = min((self.width - 2 * margin) / img.get_width(),
                 (self.height - 2 * margin) / (img.get_height() + room))
-        self.k = k
-        img = pygame.transform.smoothscale_by(img, k)
+        self.k = k                       # posições de scene.py = px de ground.png
+        size = (round(img.get_width() * k), round(img.get_height() * k))
+        if variant.exists():             # mesma ilha, mesma posição: estica para o mesmo tamanho
+            img = pygame.image.load(variant).convert_alpha()
+        img = pygame.transform.smoothscale(img, size)
         total = img.get_height() + room * k
         pos = ((self.width - img.get_width()) // 2, round((self.height - total) / 2 + room * k))
 
-        wpath = self.folder / "walkable.png"
+        wpath = self.folder / ("walkable_frozen.png" if self.frozen else "walkable.png")
         if wpath.exists():
             wimg = pygame.image.load(wpath).convert()
             mask = pygame.mask.from_threshold(wimg, (255, 255, 255), (60, 60, 60, 255))
@@ -107,27 +182,60 @@ class World:
     # ---------- por quadro ----------
     def update(self, dt: float, wind: float = 1.0, actors=()):
         """`wind` acelera o balanço das plantas; `actors` agitam as que atravessam."""
+        self.wind, self.actors = wind, actors     # lidos pelas plantas que balançam
         for p in self.props:
             p.update(dt)
+        for e in self.effects:
+            e.update(dt)
+        self.lights.update(dt)
+        self.fairies.update(dt, actors)
+        for f in self.fruits:
+            f.update(dt)
+        self.fruits = [f for f in self.fruits if not f.eaten and f.age < 600]
         for d in self.decor:
             d.update(dt, wind, actors)
 
     @property
     def drawables(self) -> list:
         """Tudo que é desenhado ordenado por profundidade (junto do personagem)."""
-        return self.props + self.decor
+        return self.props + self.decor + self.fruits
 
     def draw(self, surface: pygame.Surface):
         """Céu + ilha + camada de chão dos objetos (sombras). Objetos e personagem
         são desenhados depois, ordenados por y (veja Game.step)."""
         surface.blit(self.background, (0, 0))
         surface.blit(self.ground, self.ground_pos)
+        for e in self.effects:                 # água correndo etc. (personagens passam na frente)
+            e.draw(surface)
         for p in self.props:
             p.draw_ground(surface)
 
     def draw_lights(self, surface: pygame.Surface, darkness: float = 0.0):
+        self.lights.draw(surface, darkness)
+        self.fairies.draw_light(surface, darkness)
         for p in self.props:
             p.draw_light(surface, darkness)
+
+    def lake_surface(self):
+        """(retângulo na tela, máscara branca do lago) para recortar reflexos e brilhos, ou None."""
+        if self._lake_surface is None:
+            m = self.lake_mask
+            if not m.count():
+                self._lake_surface = False
+            else:
+                box = m.get_bounding_rects()
+                r = box[0].unionall(box[1:]) if len(box) > 1 else box[0]
+                sub = pygame.mask.Mask(r.size)
+                sub.draw(m, (-r.x, -r.y))
+                surf = sub.to_surface(setcolor=(255, 255, 255, 255), unsetcolor=(255, 255, 255, 0))
+                self._lake_surface = (r.move(self.ground_pos), surf)
+        return self._lake_surface or None
+
+    def on_lake(self, x, y, margin=6):
+        """Os pés estão em cima do lago (gelo/água)?"""
+        gx, gy = round(x - self.ground_pos[0]), round(y - self.ground_pos[1] + margin)
+        w, h = self.lake_mask.get_size()
+        return 0 <= gx < w and 0 <= gy < h and bool(self.lake_mask.get_at((gx, gy)))
 
     def draw_debug(self, surface: pygame.Surface):
         """Contorno da área andável (debug)."""
@@ -135,6 +243,10 @@ class World:
         pts = self.walk_mask.outline(4)
         if len(pts) > 2:
             pygame.draw.lines(surface, (80, 220, 255), True, [(x + ox, y + oy) for x, y in pts], 2)
+        for a, b in getattr(self, "jumps", []):                       # pulos (rosa)
+            pygame.draw.line(surface, (255, 120, 220), a, b, 2)
+            for p in (a, b):
+                pygame.draw.circle(surface, (255, 120, 220), [round(v) for v in p], 10, 2)
         for e in self.exits:                                          # saídas (amarelo)
             pygame.draw.circle(surface, (255, 220, 60), [round(v) for v in e["at"]], 14, 2)
         for f in self.food_spots:                                    # comida (verde)
@@ -189,6 +301,7 @@ class World:
         # saídas e destinos caem em ponto andável e alcançável (a grade de navegação)
         for e in self.exits:
             e["at"] = self.nav_point(e["at"])
+        self.jumps = [(self.nav_point(a), self.nav_point(b)) for a, b in self.jumps]
 
     def nav_point(self, p):
         """Centro da célula de navegação mais perto de `p`."""
@@ -247,7 +360,7 @@ class World:
         gx, gy = round(x - self.ground_pos[0]), round(y - self.ground_pos[1])
         if not (0 <= gx < self.ground.get_width() and 0 <= gy < self.ground.get_height()):
             return False
-        return bool(self.water_mask.get_at((gx, gy)))
+        return bool(self.lake_mask.get_at((gx, gy)))
 
     def _find_shore(self):
         """Pontos andáveis com água logo ao lado (esquerda/direita): onde ele bebe.
@@ -256,7 +369,7 @@ class World:
         for cx, cy in self.nav_cells:
             x, y = self._cell_center(cx, cy)
             for side, sx in (("right", 1), ("left", -1)):
-                if any(self._is_water(x + sx * d, y + dy) for d in (30, 42, 54) for dy in (-6, -14)):
+                if any(self._is_water(x + sx * d, y + dy) for d in (30, 42, 54, 66, 78) for dy in (-6, -14)):
                     out.append((x, y, side))
                     break
         return out
@@ -332,12 +445,39 @@ class World:
         return path
 
     @property
+    def dummies(self):
+        return [p for p in self.props if p.kind == "zote"]
+
+    @property
+    def snowmen(self):
+        return [p for p in self.props if p.kind == "snowman"]
+
+    @property
+    def campfires(self):
+        return [p for p in self.props if p.kind == "campfire"]
+
+    @property
+    def grubs_natal(self):
+        return [p for p in self.props if p.kind == "grub_natal"]
+
+    @property
+    def fruit_trees(self):
+        return [p for p in self.props if p.kind == "fruit_tree"]
+
+    @property
     def benches(self):
         return [p for p in self.props if p.kind == "bench"]
 
     @property
     def caves(self):
         return [p for p in self.props if p.kind == "cave"]
+
+    def ice_point(self, rng):
+        """Ponto andável em cima do lago congelado (para patinar), ou None."""
+        if not self.frozen:
+            return None
+        cells = [c for c in self.nav_cells if self._is_water(*self._cell_center(*c))]
+        return self._cell_center(*rng.choice(cells)) if cells else None
 
     def exit_to(self, area):
         return next((e for e in self.exits if e["to"] == area), None)

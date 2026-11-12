@@ -15,6 +15,8 @@ Edite / acrescente à vontade.
 import math
 import random
 
+from .config import CHARACTER_SCALE
+
 # par -> lista de roteiros. Cada passo: (quem, texto ou None, ação ou None)
 SCRIPTS = {
     ("knight", "hornet"): [
@@ -69,6 +71,27 @@ SCRIPTS.update({
         [("a", "olá, pequenino.", None), ("b", "moça bonita!", "happy"), ("a", "hihi", None)],
         [("b", "você tem coroa?", None), ("a", "tinha...", None), ("b", "eu faço uma!", "happy")],
     ],
+    ("knight", "hollow"): [
+        [("a", "oi, irmãozão!", "jump"), ("b", "...", None), ("b", "*inclina a cabeça*", None),
+         ("a", "hihi!", "jump")],
+        [("a", "*olha para cima*", "look_up"), ("b", "...", None), ("a", "você é muito alto!", None),
+         ("b", "*afaga a cabeça dele*", None)],
+        [("b", "...", None), ("a", "vamos passear?", None), ("b", "*acena que sim*", None),
+         ("a", "eba!", "jump")],
+    ],
+    ("daughter", "hollow"): [
+        [("a", "irmão...", None), ("b", "...", None), ("a", "que bom que você está em paz aqui.", None),
+         ("b", "*inclina a cabeça*", None)],
+        [("a", "a neve fica bonita no seu manto.", None), ("b", "...", None), ("a", "hihi.", None)],
+    ],
+    ("hornet", "hollow"): [
+        [("a", "Você está livre agora.", None), ("b", "...", None), ("a", "Descanse, irmão.", None),
+         ("b", "*inclina a cabeça*", None)],
+    ],
+    ("hollow", "grub"): [
+        [("b", "grandão!!", "happy"), ("a", "...", None), ("b", "oi, amigo alto!", "happy"),
+         ("a", "*inclina a cabeça*", None)],
+    ],
 })
 
 # Conversas no banco (a = Knight, b = Hornet), quando os dois estão sentados
@@ -107,6 +130,8 @@ COMFORT = {
                ("b", "hihi", "happy")],
     "daughter": [("a", "shh, estou aqui.", None), ("b", "*snif*", None), ("a", "*acaricia*", None),
                  ("b", "hihi!", "happy")],
+    "hollow": [("a", "...", None), ("b", "*snif*", None), ("a", "*fica ao lado em silêncio*", None),
+               ("b", "obrigado, grandão!", "happy")],
 }
 
 CHECK_EVERY = (25, 45)   # segundos entre tentativas de encontro
@@ -241,17 +266,17 @@ class Society:
         foot = a.feet_rect
         if b.locomotion == "burrow":
             for side in (1, -1):
-                spot = (b.x + side * 95, b.y)
+                spot = (b.x + side * 95 * CHARACTER_SCALE, b.y)
                 if self.world.walkable(foot(*spot)):
                     return spot, (b.x, b.y)
             return self.world.nearest_walkable(b.x + 95, b.y, foot), (b.x, b.y)
         mx, my = (a.x + b.x) / 2, (a.y + b.y) / 2
-        for dx in (55, 70, 40):
+        for dx in (55 * CHARACTER_SCALE, 70 * CHARACTER_SCALE, 40 * CHARACTER_SCALE):
             sa, sb = (mx - dx, my), (mx + dx, my)
             if self.world.walkable(foot(*sa)) and self.world.walkable(foot(*sb)):
                 return (sa, sb) if a.x <= b.x else (sb, sa)
-        sa = self.world.nearest_walkable(mx - 55, my, foot)
-        return sa, self.world.nearest_walkable(sa[0] + 110, sa[1], foot)
+        sa = self.world.nearest_walkable(mx - 55 * CHARACTER_SCALE, my, foot)
+        return sa, self.world.nearest_walkable(sa[0] + 110 * CHARACTER_SCALE, sa[1], foot)
 
     def _direct(self, a, b, script):
         meet = Meeting()

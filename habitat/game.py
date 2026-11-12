@@ -1,28 +1,37 @@
 """Janela, loop principal e overlay de debug."""
 import logging
+import math
 
 import pygame
 
 from .apparition import Shade
-from .brain import Brain, DaughterBrain, GrubBrain, HornetBrain
+from .audio import Music
+from .brain import Brain, DaughterBrain, GrubBrain, HollowBrain, HornetBrain
 from .character import Character, read_axis
-from .config import CHARACTER, DEBUG, FPS, HEIGHT, RESIDENTS, SHADE_ENABLED, TITLE, WIDTH
+from .actions import Prompt, do_action, find_action
+from .editor import Editor
+from .lighting import cast_shadow, reflect
+from .menu import Menu
+from .config import CHARACTER, CHARACTER_SCALE, DEBUG, FPS, HEIGHT, RESIDENTS, SHADE_ENABLED, TITLE, WIDTH
 from .environment import Environment
 from .scene import AREAS, START_AREA
 from .social import Society
 from .sprite_defs import CHARACTER_SPRITES
 from .window import PopupWindow
-from .world import World
+from .world import World, current_season
 
 
 class Game:
-    def __init__(self, online: bool = True):
+    def __init__(self, online: bool = True, start_on_title: bool = True):
         logging.basicConfig(level=logging.INFO, format="[%(name)s] %(message)s")
         pygame.init()
         # Janela popup (fixar por cima, sem borda, tamanho livre...). O jogo desenha
         # sempre em `self.screen` (WIDTHxHEIGHT) e a janela escala para o tamanho dela.
         self.window = PopupWindow((WIDTH, HEIGHT), TITLE)
         self.screen = pygame.Surface((WIDTH, HEIGHT)).convert()
+        # trilha sonora (assets/music): U = mudo, - / + = volume, botão de som na barra
+        self.music = Music(self.window.state)
+        self.window.music = self.music
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 26)
         self.debug = DEBUG
@@ -30,12 +39,20 @@ class Game:
 
         # Áreas (ilhas) do habitat: cada uma é um World (scene.AREAS). A tela mostra
         # a área onde o Knight está; ele viaja pelas saídas (tecla C = ir para a outra).
-        self.worlds = {name: World(WIDTH, HEIGHT, name) for name in AREAS}
+        self.season = current_season()                 # "natal" em nov/dez
+        self.season_override = None                    # tecla V: None (auto) / "natal" / "normal"
+        self.worlds = {name: World(WIDTH, HEIGHT, name, season=self.season) for name in AREAS}
         self.env = Environment(WIDTH, HEIGHT, online=online)
         start = self.worlds[START_AREA]
         # Moradores (config.RESIDENTS): o Knight (que o teclado controla) e quem mais
         # estiver na lista. Cada um tem sua rotina (brain.py) e eles se encontram (social.py).
-        brains = {"knight": Brain, "hornet": HornetBrain, "grub": GrubBrain, "daughter": DaughterBrain}
+        brains = {
+            "knight": Brain,
+            "hornet": HornetBrain,
+            "grub": GrubBrain,
+            "daughter": DaughterBrain,
+            "hollow": HollowBrain,
+        }
         self.members = {}
         for key in dict.fromkeys((CHARACTER,) + tuple(RESIDENTS)):
             sd = CHARACTER_SPRITES[key]
@@ -64,6 +81,10 @@ class Game:
         self.anim_index = 0
         self.routine_on = True
         self.flash = None                    # [texto, segundos] mostrado no topo
+        self.editor = Editor(self)           # tecla O: mover/redimensionar objetos e salvar
+        self.prompt = Prompt()               # "[E] ação" em cima da cabeça (actions.py)
+        self.menu = Menu(self, start_on_title=start_on_title)
+        self.window.on_menu = self.menu.toggle
 
     @property
     def world(self):
@@ -72,6 +93,10 @@ class Game:
 
     def handle_events(self):
         for event in pygame.event.get():
+            if self.editor.active and self.editor.handle(event):
+                continue                     # o editor usou (mouse, setas, salvar...)
+            if self.menu.handle_event(event):
+                continue                     # tela inicial ou painel de configurações usou
             handled = self.window.handle_event(event)
             if handled == "quit":
                 self.running = False
@@ -81,7 +106,7 @@ class Game:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    self.running = False
+                    self.menu.toggle()
                 elif event.key == pygame.K_p:
                     self.debug = not self.debug
                 # Teclas de teste das animações
@@ -89,11 +114,20 @@ class Game:
                     self.brain.take_manual()
                     self.character.toggle_sleep()
                 elif event.key == pygame.K_e:
-                    self.brain.take_manual()
-                    self.character.do_action("eat")
+                    # ação de contexto (árvore, fruta, banco, água, pulo); sem nada perto: animação de comer
+                    if not do_action(self, self.character):
+                        self.brain.take_manual()
+                        self.character.do_action("eat")
                 elif event.key == pygame.K_SPACE:
-                    self.brain.take_manual()
-                    self.character.do_action("jump")
+                    c = self.character
+                    near = [j for j in self.world.jumps
+                            if min(math.hypot(p[0] - c.x, p[1] - c.y) for p in j) < 40]
+                    if near:                       # na beira da cachoeira: pula para o outro lado
+                        self.brain.force("pular a cachoeira", self.brain.t_leap_falls(near[0], start_near=True))
+                        self.brain.manual = 0
+                    else:
+                        self.brain.take_manual()
+                        c.do_action("jump")
                 elif event.key == pygame.K_f:
                     self.brain.take_manual()
                     self.character.do_action("attack")
@@ -109,6 +143,13 @@ class Game:
                     step = 1 if event.key == pygame.K_n else -1
                     self.anim_index = (self.anim_index + step) % len(self.anim_names)
                     self.play_test(self.anim_names[self.anim_index])
+                elif event.key == pygame.K_o:      # editor de cenário
+                    self.editor.toggle()
+                elif event.key == pygame.K_v:      # estação: auto -> natal -> normal
+                    order = [None, "natal", "normal"]
+                    self.season_override = order[(order.index(self.season_override) + 1) % 3]
+                    self.set_season(current_season(self.season_override))
+                    self.show("estação: " + (self.season_override or f"automática ({self.season})"))
                 elif event.key == pygame.K_TAB:    # troca quem o teclado controla
                     self.switch_control()
                 elif event.key == pygame.K_c:      # ir para a outra ilha (teste)
@@ -116,6 +157,14 @@ class Game:
                     others = [n for n in self.worlds if n != self.character.area]
                     if others:
                         self.brain.enter_area(others[0])
+                elif event.key == pygame.K_u:      # música: mudo
+                    self.music.toggle_mute()
+                    self.show(self.music.describe(), 1.5)
+                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS, pygame.K_PLUS, pygame.K_EQUALS,
+                                   pygame.K_KP_PLUS):      # música: volume
+                    down = event.key in (pygame.K_MINUS, pygame.K_KP_MINUS)
+                    self.music.change(-0.1 if down else 0.1)
+                    self.show(self.music.describe(), 1.5)
                 elif event.key == pygame.K_m:
                     self.routine_on = not self.routine_on
                     if not self.routine_on:
@@ -123,6 +172,30 @@ class Game:
                     else:
                         self.brain.manual = 0
                     self.show("rotina " + ("LIGADA" if self.routine_on else "DESLIGADA (fica parado)"))
+
+    def set_season(self, season):
+        """Troca a estação: recria as áreas (chão, gelo, navegação) e recoloca todo mundo."""
+        if season == self.season:
+            return
+        self.season = season
+        for name in list(self.worlds):
+            w = World(WIDTH, HEIGHT, name, season=season)
+            w.build_nav(self.character.feet_rect)
+            self.worlds[name] = w
+        for ch in self.characters:
+            b = ch.brain
+            b._drop_task()
+            b.leave_bench()
+            ch.swimming = ch.in_cave = ch.pinned = False
+            if ch.state not in ("sleep", "lie_down"):
+                ch.state = "idle"
+            w = self.worlds[ch.area]
+            b.world = ch.world = w
+            b.worlds = self.worlds
+            b.__dict__.pop("_spots_cache", None)
+            ch.x, ch.y = w.nav_point((ch.x, ch.y))
+        if self.society:
+            self.society.world = self.worlds[self.character.area]
 
     def switch_control(self):
         """Tab: o teclado e as teclas de teste passam para o próximo morador que tenha
@@ -156,22 +229,26 @@ class Game:
     def step(self, dt: float):
         """Um quadro de lógica + desenho (separado do loop para facilitar testes)."""
         self.handle_events()
+        self.music.update()                 # começa a tocar se a conversão da música terminou
+        self.menu.update(dt)
         c = self.character
-        keys_axis = read_axis(pygame.key.get_pressed())
+        editing = self.editor.active        # editor de cenário: todo mundo parado
+        in_menu = self.menu.active          # menu aberto: habitat continua vivo, teclado não move
+        keys_axis = (0, 0) if (editing or in_menu) else read_axis(pygame.key.get_pressed())
         if keys_axis != (0, 0):
             c.pinned = False
-        if keys_axis != (0, 0) or not self.routine_on:
+        if (keys_axis != (0, 0) or not self.routine_on) and not editing and not in_menu:
             self.brain.take_manual()        # jogador no controle (ou rotina desligada)
         click = self.window.pop_click()
-        if click:                           # clicou em alguém? (o mais à frente)
+        if click and not editing and not in_menu:  # clicou em alguém? (o mais à frente)
             for ch in sorted(self.characters, key=lambda o: -o.y):
                 if pygame.Rect(ch.x - 40, ch.y - 120, 80, 125).collidepoint(click):
                     ch.brain.poke()
                     break
-        if self.society:
+        if self.society and not editing:
             self.society.update(dt)
         for ch in self.characters:
-            axis = ch.brain.update(dt)
+            axis = (0.0, 0.0) if editing else ch.brain.update(dt)
             if ch is c and keys_axis != (0, 0):
                 axis = keys_axis
             ch.update(dt, axis, self.worlds[ch.area])
@@ -194,10 +271,12 @@ class Game:
             if self.shade.pop_appeared():         # os moradores reagem
                 for ch in self.characters:
                     ch.brain.react_shade(self.shade)
-        if c.hit_now:
-            self.resolve_hit()
+        for ch in here:                       # golpes (no quadro em que a lâmina acerta)
+            if ch.hit_now:
+                self.resolve_hit(ch)
 
         self.world.draw(self.screen)
+        self.draw_shadows_and_reflections(here)
         # Profundidade: quem está mais embaixo na tela (y maior) fica na frente
         for obj in sorted(self.world.drawables + here, key=lambda o: o.y):
             if obj in here:
@@ -207,6 +286,7 @@ class Game:
                 obj.draw(self.screen, tint=tint)
             else:
                 obj.draw(self.screen, viewer=c)
+        self.world.fairies.draw(self.screen)                   # fadinhas voam por cima de tudo
         self.env.apply_light(self.screen)                      # noite / tarde / céu nublado
         self.world.draw_lights(self.screen, self.env.darkness)  # fogueira, janelas, poste
         for ch in here:
@@ -214,19 +294,49 @@ class Game:
         if self.shade:
             self.shade.draw(self.screen)                       # a Sombra (não escurece)
         self.env.draw_weather(self.screen)                     # chuva e relâmpagos
-        for ch in here:
-            ch.draw_speech(self.screen)                        # balões de fala
-        self.env.draw_hud(self.screen)
+        if not in_menu:
+            for ch in here:
+                ch.draw_speech(self.screen)                    # balões de fala
+        c_ = self.character                                    # "[E] ação" de quem o jogador controla
+        if (self.brain.manual > 0 or not self.routine_on or self.brain.player_task) and not editing and not in_menu:
+            act = find_action(self, c_)
+            if act:
+                self.prompt.draw(self.screen, c_, act[0], enabled=act[1] is not None)
+        if not self.menu.in_settings:
+            self.env.draw_hud(self.screen)
         self.draw_flash(dt)
+        self.editor.draw(self.screen)
         if self.debug:
             self.draw_debug()
+        self.menu.draw(self.screen)
         if self.fade > 0:                     # escurecimento da troca de área
             veil = pygame.Surface(self.screen.get_size())
             veil.set_alpha(round(255 * min(1.0, self.fade)))
             self.screen.blit(veil, (0, 0))
-        self.window.present(self.screen)
+        self.window.present(self.screen, show_toolbar=not self.menu.active)
 
-    def separate(self, dt, chars=None, min_dist=46):
+    def draw_shadows_and_reflections(self, here):
+        """Sombras do sol (personagens e objetos) e reflexos no gelo, no chão (antes de tudo)."""
+        w, s = self.world, self.screen
+        sun = self.env.sun()
+        if sun:
+            for p in w.props:
+                img = p.shadow_image()                # sem o balanço da brisa (cache de sombras)
+                cast_shadow(s, img, (p.x, p.y + p.base_offset), (img.get_width() / 2, img.get_height()), sun)
+            for ch in here:
+                pose = ch.pose()
+                if pose and not ch.swimming and not ch.in_cave:
+                    img, foot, anchor, lift = pose
+                    cast_shadow(s, img, foot, anchor, (sun[0], sun[1], sun[2] * (1 - min(0.8, lift / 80))))
+        for ch in here:                       # reflexo de quem está no gelo / na água
+            if ch.swimming or not w.on_lake(ch.x, ch.y):
+                continue
+            pose = ch.pose()
+            if pose:
+                img, foot, anchor, lift = pose
+                reflect(s, w, img, foot, anchor, lift)
+
+    def separate(self, dt, chars=None, min_dist=46 * CHARACTER_SCALE):
         """Personagens muito colados se afastam devagar (um não some atrás do outro)."""
         chars = [c for c in (chars if chars is not None else self.characters)
                  if c.state not in ("sleep", "lie_down") and not c.seated_on and not c.in_cave]
@@ -246,12 +356,15 @@ class Game:
                     if not self.world.blocked(who.feet_rect(nx, who.y)):
                         who.x = nx
 
-    def resolve_hit(self):
-        """Golpe do ferrão: acerta bonecos à frente do personagem, perto e na mesma "faixa"."""
-        c = self.character
+    def resolve_hit(self, c=None):
+        """Golpe: acerta o que está logo à frente de `c` (boneco de treino, árvore de frutas...)."""
+        c = c or self.character
         side = 1 if c.facing == "right" else -1
-        for p in self.world.props:
-            if hasattr(p, "hit") and 0 < (p.x - c.x) * side < 130 and abs(p.y - c.y) < 50:
+        for p in self.worlds[c.area].props:
+            if not hasattr(p, "hit"):
+                continue
+            reach = 26 + p.frames[0].get_width() * 0.35
+            if 0 < (p.x - c.x) * side < reach and abs(p.y - c.y) < 30:
                 p.hit(c.facing)
 
     def draw_debug(self):
@@ -281,9 +394,10 @@ class Game:
             lines.append("sombra: " + (f"em cena ({self.shade.left:.0f}s)" if self.shade.visible
                                        else f"próxima tentativa {self.shade.timer:.0f}s"
                                        + ("" if self.shade.eligible() else " (só noite/chuva)")))
-        lines.append("Z dormir  E comer  Espaco pular  F atacar")
+        lines.append("E ação (árvore, fruta, banco, água, pulo)  Z dormir  Espaco pular  F atacar")
         lines.append("N/B animação seguinte/anterior  M rotina " + ("on" if self.routine_on else "OFF")
-                     + ("  C outra ilha" if len(self.worlds) > 1 else "") + "  Tab trocar personagem")
+                     + ("  C outra ilha" if len(self.worlds) > 1 else "") + "  Tab trocar personagem  V estação"
+                     + "  O editor")
         lines.append("T hora (auto/dia/tarde/noite)  R chuva (auto/sim/nao)"
                      + ("  G chamar a Sombra" if self.shade else ""))
 

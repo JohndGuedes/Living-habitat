@@ -6,6 +6,7 @@ import math
 import pygame
 
 from .assets import load_sprite_set
+from .config import CHARACTER_SCALE
 from .spritesheet import Animator, dir_from_vector
 
 
@@ -21,6 +22,7 @@ class Character:
         self.name = name
         self.x = x            # posição dos "pés", em pixels de jogo
         self.y = y
+        speed *= CHARACTER_SCALE   # menor = anda menos px por segundo (passo proporcional)
         self.speed = speed    # pixels de jogo por segundo
         self.dir = "down"
         self.facing = "right"  # último lado horizontal (para sprites de vista lateral)
@@ -32,7 +34,7 @@ class Character:
         # Correr: a rotina liga `running` em trajetos longos; só vale se houver
         # a animação "run" (usa `run_speed` em vez de `speed`)
         self.running = False
-        self.run_speed = sprite_def.get("run_speed", speed * 1.8)
+        self.run_speed = sprite_def.get("run_speed", speed / CHARACTER_SCALE * 1.8) * CHARACTER_SCALE
         self.pinned = False        # teste de sprites: anda/corre sem sair do lugar
         # Variações escolhidas pela rotina (só valem se a animação existir):
         self.lantern = False       # noite: parado/andando com a lanterna
@@ -43,7 +45,7 @@ class Character:
         self.area = None           # nome da área (ilha) onde está (Game/rotina mudam ao viajar)
         self.in_cave = False       # dentro da caverna: desenhado escurecido
         self.brain = None          # a rotina, se houver (ligada pelo Game)
-        self.seat_drop = sprite_def.get("seat_drop", 0)
+        self.seat_drop = sprite_def.get("seat_drop", 0) * CHARACTER_SCALE
         self.seated_on = None      # (banco, assento) quando sentado
         self.seat_lift = 0.0       # altura extra do desenho (sentado no banco)
         self.animator = Animator()
@@ -52,6 +54,7 @@ class Character:
         self.font = pygame.font.Font(None, 30)
 
         sw, sh = sprite_def.get("shadow", (16, 5))
+        sw, sh = max(4, round(sw * CHARACTER_SCALE)), max(2, round(sh * CHARACTER_SCALE))
         self._shadow = pygame.Surface((sw, sh), pygame.SRCALPHA)
         pygame.draw.ellipse(self._shadow, (0, 0, 0, 56), self._shadow.get_rect())
 
@@ -84,7 +87,8 @@ class Character:
         """Área dos pés usada na colisão com objetos sólidos."""
         x = self.x if x is None else x
         y = self.y if y is None else y
-        return pygame.Rect(round(x - 14), round(y - 8), 28, 10)
+        w, h = round(28 * CHARACTER_SCALE), max(4, round(10 * CHARACTER_SCALE))   # pés do tamanho dele
+        return pygame.Rect(round(x - w / 2), round(y - h + 2), w, h)
 
     def anim_name(self) -> str:
         """Animação de verdade para o estado atual (variações: nadar, lanterna,
@@ -98,6 +102,8 @@ class Character:
                 return "walk_up"          # andando de costas (para o fundo)
             if self.dir == "down" and "walk_down" in has:
                 return "walk_down"        # andando de frente (para a câmera)
+            if self.dir in ("up_left", "up_right") and "walk_up_side" in has:
+                return "walk_up_side"     # diagonal de costas (mostrando a capa/ferrão)
             if self.lantern and "lantern_walk" in has:
                 return "lantern_walk"
             if s == "walk" and self.walk_variant in has:
@@ -204,6 +210,17 @@ class Character:
         else:
             self._draw_placeholder(surface)
 
+    def pose(self):
+        """(imagem, pés na tela, (ax, ay), altura do pulo) do quadro atual, ou None.
+        Usado pelas sombras do sol e pelos reflexos no gelo (lighting.py)."""
+        cur = self.current_frame()
+        if not cur:
+            return None
+        sheet, frame = cur
+        img, ax, ay = sheet.frame_image(frame, self.dir, self.facing)
+        lift = sheet.lift_at(self.animator.time) if sheet.name == self.animator.name else 0
+        return img, (self.x, self.y - self.seat_lift), (ax, ay), lift
+
     def _flip_side(self, sheet) -> bool:
         """True se o desenho está espelhado (olhando para o lado oposto da arte)."""
         if not sheet.art_faces:
@@ -226,7 +243,7 @@ class Character:
         center = (round(self.x + (-dx if flip else dx)), round(self.y + dy - self.seat_lift))
         surface.blit(img, img.get_rect(center=center))
 
-    WATERLINE = 36    # px acima dos pés onde fica a superfície da água (nadando)
+    WATERLINE = 36 * CHARACTER_SCALE   # px acima dos pés: superfície da água (nadando)
 
     def _draw_water_cover(self, surface):
         """Nadando: cobre o corpo abaixo da linha d'água com a própria água do lago
@@ -286,7 +303,7 @@ class Character:
         bubble.set_alpha(round(255 * max(0.0, alpha)))
         cur = self.current_frame()
         lift = cur[0].lift_at(self.animator.time) if cur and cur[0].name == self.animator.name else 0
-        top = 92 if self.state in ("sleep", "lie_down") else 128  # deitado = mais baixo
+        top = (92 if self.state in ("sleep", "lie_down") else 128) * CHARACTER_SCALE  # deitado = mais baixo
         x = max(4, min(surface.get_width() - w - 4, round(self.x - w / 2)))
         surface.blit(bubble, (x, round(self.y - top - lift - self.seat_lift - h)))
 

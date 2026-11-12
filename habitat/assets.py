@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pygame
 
-from .config import ROOT, SPRITES_DIR
+from .config import CHARACTER_SCALE, ROOT, SPRITES_DIR
 from .spritesheet import SpriteSheet, _scale
 
 log = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def _common_opts(definition: dict, anim: dict) -> dict:
         frame_duration=anim.get("frame_duration", 0.12),
         loop=anim.get("loop", True),
         next_state=anim.get("next", "idle"),
-        hop=anim.get("hop", 0),
+        hop=anim.get("hop", 0) * CHARACTER_SCALE,     # altura do pulo acompanha o tamanho
         hit_frame=anim.get("hit_frame"),
         art_faces=anim.get("art_faces", definition.get("art_faces")),
     )
@@ -37,7 +37,9 @@ def _common_opts(definition: dict, anim: dict) -> dict:
 
 def load_sprite_set(definition: dict) -> dict[str, SpriteSheet]:
     """Carrega as animações de uma entrada de CHARACTER_SPRITES.
-    Retorna {nome: SpriteSheet} só com as que existem."""
+    Retorna {nome: SpriteSheet} só com as que existem.
+    A "scale" do personagem é multiplicada por config.CHARACTER_SCALE."""
+    definition = dict(definition, scale=definition.get("scale", 1) * CHARACTER_SCALE)
     if "frames_root" in definition:
         return _load_frame_folders(definition)
 

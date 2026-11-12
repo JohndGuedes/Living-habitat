@@ -5,6 +5,9 @@ Rode:  .venv\\Scripts\\python tools\\make_areas.py [pasta_de_previas]
 Fonte: assets/sprites/world/areas/<área>/source/<arquivo>.png
 Saída: assets/sprites/world/areas/<área>/
          ground.png    a ilha com fundo transparente
+         ground_<v>.png  versões da mesma ilha ("variants", ex.: natal), recortadas pelo
+                       contorno da ilha normal (as imagens são alinhadas pixel a pixel)
+         walkable_frozen.png  andável com o lago congelado (gelo: dá para andar por cima)
          walkable.png  onde dá para andar (branco), 1 célula = CELL px da imagem
          water.png     o lago (branco), mesma grade (onde dá para nadar)
          cave.png      (só se a área tiver "cave") a caverna recortada
@@ -37,14 +40,53 @@ MARGIN = 3      # células de folga entre a área andável e a borda
 # px da imagem de origem
 AREAS = {
     "lago": {
-        "source": "source/island.png",
-        "lake": (1200, 320),
+        "source": "source/ground.png",          # a ilha com a casinha
+        "lake": (760, 190),
+        # não andável mesmo tendo cor de grama (x, y, w, h em px da imagem): a casinha
+        "block": [(350, 20, 140, 118)],
+    },
+    # mapa de Natal (outro desenho: dois níveis ligados por escadas, píer, casinha,
+    # lago congelado e a cachoeira no alto). Usado em nov/dez (scene.AREAS["lago"]["seasons"]).
+    "natal": {
+        "source": "source/ground-natal.jpg",
+        "cell": 8,                               # imagem grande (2752x1536): células maiores
+        "margin": 1,                             # folga da borda (em células): escadas são estreitas
+        "bg": "corner", "bg_tol": 14,            # fundo azul-escuro com estrelas
+        "ground": "snow",                        # neve, gelo, trilhas, escadas e píer
+        "lake": (1960, 820), "lake_test": "ice",
+        "frozen": True,                          # o gelo já é chão
+        # a cachoeira (branca como a neve): não é chão; os personagens PULAM por cima dela
+        "block": [(2008, 133, 225, 600), (2217, 150, 67, 167)],
+        # andável à força (x, y, w, h): a escada da direita, que desce da beira da cachoeira
+        # (tem uma coluna de pedra escura no meio que cortava o caminho)
+        # o halo desenhado em volta da estrela da árvore ficou como um disco escuro sobre o
+        # céu: nesse círculo (cx, cy, raio), acima da ponta da árvore, só a estrela fica; o jogo põe o brilho
+        "clear_dark": [(686, 95, 62)],
+        "allow": [(2393, 411, 89, 111), (2449, 511, 100, 112), (2516, 612, 100, 122), (2482, 712, 112, 101)],
+        # comida: as plantinhas brancas (a neve é clara demais para achar sozinho)
+        "food": [(1050, 1008), (1200, 1283), (1283, 1292), (1917, 983), (2133, 1183), (1750, 933),
+                 (1592, 783), (600, 908), (2683, 883), (1900, 233), (1167, 233), (1350, 158)],
     },
 }
 
 
 def is_background(r, g, b):
     return max(r, g, b) <= 24
+
+
+def is_snow(r, g, b):
+    """Mapa de Natal: neve, gelo, trilhas, escadas e píer (claros); paredões e rochas
+    são escuros."""
+    return (r + g + b) / 3 >= 95 and b >= r - 6
+
+
+def is_ice(r, g, b):
+    """Gelo do lago: azulado e um pouco mais escuro que a neve em volta."""
+    return (r + g + b) / 3 < 140 and b - r >= 38
+
+
+GROUND_TESTS = {"grass": None, "snow": is_snow}
+LAKE_TESTS = {"water": None, "ice": is_ice}
 
 
 def is_ground(r, g, b):
@@ -59,9 +101,17 @@ def is_water(r, g, b):
     return b > g + 16 and g > r + 15 and g < 72 and 40 < b < 115
 
 
-def remove_background(src):
+def remove_background(src, tol=None):
+    """tol=None: fundo = pixels bem escuros; tol=n: fundo = cor do canto (± n)."""
     W, H = src.get_size()
     rgb = pygame.image.tobytes(src, "RGB")
+    if tol is not None:
+        c0 = tuple(rgb[0:3])
+
+        def is_background(r, g, b):     # noqa: F811 (só dentro desta chamada)
+            return abs(r - c0[0]) <= tol and abs(g - c0[1]) <= tol and abs(b - c0[2]) <= tol
+    else:
+        is_background = globals()["is_background"]
     bg = bytearray(W * H)
     q = deque(range(W))
     q.extend((H - 1) * W + x for x in range(W))
@@ -224,6 +274,8 @@ def food_spots(ground, walk, gw, gh):
 
 
 def make(name, spec, preview_dir=None):
+    global CELL
+    CELL = spec.get("cell", 4)
     folder = AREAS_DIR / name
     src = pygame.image.load(str(folder / spec["source"])).convert()
     for rect in spec.get("erase", []):
@@ -236,18 +288,36 @@ def make(name, spec, preview_dir=None):
     if top:
         src = src.subsurface((0, top, src.get_width(), src.get_height() - top)).copy()
     W, H = src.get_size()
-    ground, rgb = remove_background(src)
+    ground, rgb = remove_background(src, spec.get("bg_tol") if spec.get("bg") == "corner" else None)
+    for cx, cy, r in spec.get("clear_dark", []):     # discos escuros em volta de brilhos
+        for yy in range(max(0, cy - top - r), min(H, cy - top + r + 1)):
+            for xx in range(max(0, cx - r), min(W, cx + r + 1)):
+                if (xx - cx) ** 2 + (yy - cy + top) ** 2 > r * r:
+                    continue
+                c = ground.get_at((xx, yy))
+                ty = yy - (cy - top + 18)                  # abaixo da estrela: a árvore é um triângulo
+                tree = ty > 0 and abs(xx - cx) < ty * 0.62 + 3
+                if c.a and (c.r + c.g + c.b) / 3 < 150 and not tree:   # só a estrela e a árvore ficam
+                    ground.set_at((xx, yy), (0, 0, 0, 0))
     pygame.image.save(ground, str(folder / "ground.png"))
     print(f"  ground.png: {W}x{H}")
 
-    walk, gw, gh = grid_of(rgb, W, H, is_ground)
+    walk, gw, gh = grid_of(rgb, W, H, GROUND_TESTS.get(spec.get("ground", "grass")) or is_ground)
     walk = morph(morph(walk, gw, gh, CLOSE, True), gw, gh, CLOSE, False)
     walk = region(walk, gw, gh)
-    walk = morph(walk, gw, gh, MARGIN, False)
+    walk = morph(walk, gw, gh, spec.get("margin", MARGIN), False)
+    for bx, by, bw, bh in spec.get("block", []):
+        for cy in range(max(0, (by - top) // CELL), min(gh, (by - top + bh) // CELL + 1)):
+            for cx in range(max(0, bx // CELL), min(gw, (bx + bw) // CELL + 1)):
+                walk[cy][cx] = False
+    for bx, by, bw, bh in spec.get("allow", []):
+        for cy in range(max(0, (by - top) // CELL), min(gh, (by - top + bh) // CELL + 1)):
+            for cx in range(max(0, bx // CELL), min(gw, (bx + bw) // CELL + 1)):
+                walk[cy][cx] = True
     wimg = save_grid(walk, gw, gh, folder / "walkable.png")
 
     lx, ly = spec["lake"]
-    water, _, _ = grid_of(rgb, W, H, is_water)
+    water, _, _ = grid_of(rgb, W, H, LAKE_TESTS.get(spec.get("lake_test", "water")) or is_water)
     water = morph(morph(water, gw, gh, CLOSE, True), gw, gh, CLOSE, False)   # fecha
     water = morph(morph(water, gw, gh, 2, False), gw, gh, 2, True)           # abre: corta pontes finas
     water = region(water, gw, gh, seed=(lx // CELL, (ly - top) // CELL))
@@ -255,7 +325,37 @@ def make(name, spec, preview_dir=None):
     aimg = save_grid(water, gw, gh, folder / "water.png")
     print(f"  walkable.png / water.png: {gw}x{gh} (1 célula = {CELL}px)")
 
-    food = food_spots(ground, walk, gw, gh)
+    # lago congelado: o gelo vira chão, ligado à margem (a folga da borda não pode separar)
+    if spec.get("frozen"):                   # mapa que já é de inverno: o gelo já é chão
+        save_grid(walk, gw, gh, folder / "walkable_frozen.png")
+    else:
+        raw, _, _ = grid_of(rgb, W, H, lambda r, g, b: is_ground(r, g, b) or is_water(r, g, b))
+        near_lake = morph(water, gw, gh, MARGIN + 2, True)
+        frozen = [[walk[y][x] or water[y][x] or (near_lake[y][x] and raw[y][x]) for x in range(gw)]
+                  for y in range(gh)]
+        frozen = region(frozen, gw, gh)
+        save_grid(frozen, gw, gh, folder / "walkable_frozen.png")
+
+    # outras épocas da mesma ilha: podem ter outra resolução (mesma proporção e posição);
+    # recortadas pelo contorno da normal (com folga para a neve), suavizado na escala delas
+    if spec.get("variants"):
+        alpha = pygame.mask.from_surface(ground, 1)
+        outline = alpha.convolve(pygame.mask.Mask((7, 7), fill=True))   # 3 px mais largo
+        outline = outline.overlap_mask(outline, (0, 0))
+        cut = pygame.Surface((W + 6, H + 6), pygame.SRCALPHA)
+        cut.blit(outline.to_surface(setcolor=(255, 255, 255, 255), unsetcolor=(255, 255, 255, 0)), (0, 0))
+        cut = cut.subsurface((3, 3, W, H)).copy()
+        for vname, vsrc in spec["variants"].items():
+            img = pygame.image.load(str(folder / vsrc)).convert_alpha()
+            if top:
+                k = img.get_height() / (H + top)
+                img = img.subsurface((0, round(top * k), img.get_width(), img.get_height() - round(top * k))).copy()
+            out = img.copy()
+            out.blit(pygame.transform.smoothscale(cut, img.get_size()), (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            pygame.image.save(out, str(folder / f"ground_{vname}.png"))
+            print(f"  ground_{vname}.png")
+
+    food = [tuple(p) for p in spec["food"]] if "food" in spec else food_spots(ground, walk, gw, gh)
     meta = {"food": food, "island_top": top}
     if "cave" in spec:
         meta["cave_rect"] = spec["cave"]

@@ -1,0 +1,224 @@
+{
+  "lago@natal": [
+    {
+      "kind": "bench",
+      "img_pos": [
+        1219.1,
+        1077.8
+      ],
+      "file": "items/town_bench_lit.png",
+      "scale": 1.0,
+      "seats": [
+        -24,
+        24
+      ],
+      "approach_dy": 22
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/estatua_lanterna.png",
+      "img_pos": [
+        67.4,
+        770.5
+      ],
+      "scale": 0.967,
+      "name": "estatua_lanterna"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/pisca_pisca.png",
+      "img_pos": [
+        508.6,
+        286.6
+      ],
+      "scale": 1.296,
+      "name": "pisca_pisca"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/poste.png",
+      "img_pos": [
+        1096.3,
+        1082.0
+      ],
+      "scale": 0.967,
+      "name": "poste"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/pilar_lanterna_2.png",
+      "img_pos": [
+        1354.1,
+        1080.2
+      ],
+      "scale": 0.921,
+      "name": "pilar_lanterna_2"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/poste_curvo.png",
+      "img_pos": [
+        868.3,
+        436.8
+      ],
+      "scale": 0.921,
+      "name": "poste_curvo"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/poste_guirlanda.png",
+      "img_pos": [
+        141.5,
+        1100.5
+      ],
+      "scale": 0.967,
+      "name": "poste_guirlanda"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/presentes.png",
+      "img_pos": [
+        1074.1,
+        1095.0
+      ],
+      "scale": 1.824,
+      "name": "presentes"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/presentes.png",
+      "img_pos": [
+        1398.6,
+        1104.3
+      ],
+      "scale": 2.011,
+      "name": "presentes"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/presentes_2.png",
+      "img_pos": [
+        147.1,
+        1109.8
+      ],
+      "scale": 2.011,
+      "name": "presentes_2"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal/pedra_azevinho.png",
+      "img_pos": [
+        983.3,
+        572.2
+      ],
+      "scale": 1.575,
+      "name": "pedra_azevinho"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal_2/pinheiro_enfeitado.png",
+      "img_pos": [
+        1018.5,
+        600.0
+      ],
+      "scale": 2.112,
+      "name": "pinheiro_enfeitado"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal_2/pinheiro_enfeitado.png",
+      "img_pos": [
+        1370.8,
+        592.5
+      ],
+      "scale": 2.011,
+      "name": "pinheiro_enfeitado"
+    },
+    {
+      "kind": "fruit_tree",
+      "file": "world/library/natal_2/arvore_frutas.png",
+      "img_pos": [
+        1734.2,
+        653.7
+      ],
+      "scale": 1.954,
+      "name": "arvore_frutas"
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal_2/folhas_secas.png",
+      "img_pos": [
+        829.4,
+        1337.9
+      ],
+      "scale": 1.915,
+      "name": "folhas_secas",
+      "solid": false,
+      "footprint": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "item",
+      "file": "world/library/natal_2/pinheiro_enfeitado.png",
+      "img_pos": [
+        2058.6,
+        1044.9
+      ],
+      "scale": 2.218,
+      "name": "pinheiro_enfeitado"
+    },
+    {
+      "kind": "zote",
+      "file": "world/library/natal/boneco_zote.png",
+      "img_pos": [
+        325.1,
+        748.3
+      ],
+      "scale": 0.907,
+      "name": "boneco_zote"
+    },
+    {
+      "kind": "snowman",
+      "file": "world/library/natal/boneco_neve_knight.png",
+      "img_pos": [
+        615.2,
+        749.9
+      ],
+      "scale": 1.329,
+      "name": "boneco_neve_knight"
+    },
+    {
+      "kind": "snowman",
+      "file": "world/library/natal/boneco_neve_hornet.png",
+      "img_pos": [
+        1342.1,
+        767.2
+      ],
+      "scale": 1.395,
+      "name": "boneco_neve_hornet",
+      "solid": true
+    },
+    {
+      "kind": "campfire",
+      "file": "world/library/natal/fogueira.png",
+      "img_pos": [
+        1225.0,
+        1230.0
+      ],
+      "scale": 0.85,
+      "name": "fogueira"
+    },
+    {
+      "kind": "grub_natal",
+      "file": "world/library/natal/grub_natal.png",
+      "img_pos": [
+        980.0,
+        1180.0
+      ],
+      "scale": 0.85,
+      "name": "grub_natal"
+    }
+  ]
+}

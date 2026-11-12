@@ -18,6 +18,8 @@ e volta sozinha alguns segundos depois.
 import math
 import random
 
+from .config import CHARACTER_SCALE
+
 # --------------------------------------------------------------------------
 # Falas (escolhidas ao acaso dentro de cada grupo). {temp} e {city} são
 # trocados pelo clima real.
@@ -36,7 +38,10 @@ LINES = {
     "drink":      ["ahh, água fresca", "glub glub", "que delícia", "refrescante!"],
     "hungry":     ["fome...", "barriga roncando", "hmm, florzinha...", "que fome"],
     "eat":        ["nhac!", "nham nham", "docinho", "hmm, gostoso"],
+    "fruit_hit":  ["hyah! frutinha!", "cai, fruta!", "toc toc!", "hop!"],
+    "eat_fruit":  ["nham, cereja!", "docinha!", "hmm, fruta fresca", "nhac nhac"],
     "train":      ["hora de treinar!", "hyah!", "tá!", "mais um!", "foco!"],
+    "train_end":  ["quebrei!", "ufa!", "toma, Zote!", "ha!"],
     "jump":       ["ê!", "upa!", "hop!", "yay!"],
     "look_up":    ["hmm?", "o que é aquilo?", "nuvens...", "que céu"],
     "stars":      ["olha as estrelas", "que noite bonita", "lua..."],
@@ -63,11 +68,23 @@ LINES = {
     "swimming":   ["que água boa", "*nada*", "glub", "fresquinho"],
     "swim_out":   ["chega de nadar", "*sacode*", "molhadinho"],
     "travel":     ["vou pra outra ilha", "explorar lá!", "o que tem do outro lado?", "partiu"],
+    "xmas":       ["feliz natal!", "neve!", "que frio...", "olha a arvorezinha!", "a casinha tá enfeitada"],
+    "skate":      ["patinando!", "uiii!", "escorrega!", "gelo!"],
+    "drink_ice":  ["*quebra o gelo*", "água geladinha!", "brr, gelada"],
+    "falls":      ["upa! por cima da cachoeira!", "hop!", "consegui!", "uau, que altura"],
     "arrive":     ["cheguei!", "hmm, aqui...", "olha só", "que lugar"],
     "cave_sleep": ["hora de ir pra caverna", "minha caverna...", "dormir no quentinho"],
     "shelter":    ["chuva! pra caverna!", "vou me abrigar", "aqui não molha"],
     "sheltered":  ["sequinho aqui", "*ouve a chuva*", "plic plic lá fora"],
     "rain_over":  ["parou de chover!", "vamos lá fora", "o céu abriu"],
+    "snowman_build": ["vou montar um boneco!", "juntando neve...", "quase pronto!", "mais uma bola de neve!"],
+    "snowman_done":  ["pronto! ficou igualzinho!", "tcharam! boneco de neve!", "eba! montei!", "olha que legal!"],
+    "snowman_break": ["hyah! neve voando!", "toma, boneco de neve!", "vou desmontar!", "puff!"],
+    "fire_light": ["fogueira acesa!", "quentinho!", "fogo!", "agora tá quentinho!"],
+    "fire_douse": ["apaguei a fogueira!", "shhh... sem fogo", "fumaça...", "apagada!"],
+    "fire_warm":  ["quentinho aqui...", "*esquenta as mãozinhas*", "fogueira boa", "ahh, quentinho"],
+    "grub_free":  ["vou te tirar daí, Grub!", "tá livre, amiguinho!", "eba! o Grub saiu!", "oi, Grub de gorrinho!"],
+    "grub_play":  ["hihi, olha ele pulando!", "feliz natal, Grub!", "ele mergulhou na neve!", "que fofo!"],
 }
 
 # Animações de quem está sentado no banco
@@ -96,7 +113,7 @@ class Brain:
     # como beber: [(animação, segurar_segundos ou None = até acabar)]
     DRINK_ANIMS = [("look_down", 1.2), ("eat", None), ("eat", None)]
     # tarefas em que dá para ser chamado para interagir com outro personagem
-    SOCIAL_OK = ("passear", "parado", "olhar o céu", "ver o lago", "pular", "treinar")
+    SOCIAL_OK = ("passear", "parado", "olhar o céu", "ver o lago", "pular", "treinar", "patinar")
 
     def __init__(self, character, world, env, seed=None):
         character.brain = self
@@ -118,6 +135,8 @@ class Brain:
         self.last_flash = 0.0
         self.recent = []           # últimas falas (evita repetir)
         self.others = ()           # outros personagens (o Game preenche)
+        self.stand_request = False # E no banco (jogador): levantar
+        self.player_task = False   # rodando uma ação pedida pelo jogador (tecla E)
         self.worlds = {world.name: world} if hasattr(world, "name") else {}   # todas as áreas (Game)
 
     # ---------- falas ----------
@@ -141,6 +160,8 @@ class Brain:
             groups += ["rain"] * 3
         if d.get("temp") is not None and d["temp"] >= 30 and env.phase in ("Dia", "Tarde"):
             groups += ["hot"] * 2
+        if getattr(self.world, "season", "") == "natal":
+            groups += ["xmas"] * 2
         if env.phase == "Noite":
             groups += ["night", "stars"]
         elif env.phase in ("Entardecer", "Tarde"):
@@ -204,6 +225,8 @@ class Brain:
             self.manual -= dt
             return (0.0, 0.0)
         self.axis = (0.0, 0.0)
+        if self.task is None and self.c.swimming:     # ficou na água (jogador nadou): sai
+            self.task_name, self.task = "sair da água", self.t_leave_water()
         if self.task is None:
             self.task_name, self.task = self.choose()
         try:
@@ -254,7 +277,7 @@ class Brain:
             return "abrigo", self.t_shelter()
         if self.thirst > NEED_THRESHOLD and self.world.shore:
             return "beber", self.t_drink()
-        if self.hunger > NEED_THRESHOLD and self._food():
+        if self.hunger > NEED_THRESHOLD and self._can_eat():
             return "comer", self.t_eat()
         options = [
             ("passear", self.t_wander, 40 + 30 * self.boredom),
@@ -267,10 +290,15 @@ class Brain:
             ("sentir o vento", self.t_wind, self.wind_weight()),
             ("nadar", self.t_swim, self.swim_weight()),
             ("outra ilha", self.t_go_other, 2 if len(self.worlds) > 1 else 0),
+            ("patinar", self.t_skate, 6 if getattr(self.world, "frozen", False) else 0),
+            ("pular a cachoeira", self.t_leap_falls, 5 if getattr(self.world, "jumps", None) else 0),
+            ("boneco de neve", self.t_snowman, self.snowman_weight()),
+            ("fogueira", self.t_campfire, self.campfire_weight()),
+            ("grub de natal", self.t_grub_natal, self.grub_natal_weight()),
         ]
         if self.thirst > 0.45 and self.world.shore:
             options.append(("beber", self.t_drink, 20))
-        if self.hunger > 0.45 and self._food():
+        if self.hunger > 0.45 and self._can_eat():
             options.append(("comer", self.t_eat, 20))
         names, fns, weights = zip(*options)
         i = self.rng.choices(range(len(fns)), weights=weights)[0]
@@ -518,6 +546,10 @@ class Brain:
         yield from self.wait(1)
 
     def t_train(self):
+        dummies = [d for d in getattr(self.world, "dummies", []) if not d.destroyed]
+        if dummies and self.rng.random() < 0.75:           # tem boneco: treina nele
+            yield from self.t_train_dummy(min(dummies, key=lambda d: math.dist((d.x, d.y), (self.c.x, self.c.y))))
+            return
         self.say("train", 0.8)
         yield from self.wait(0.6)
         moves = [(a, w) for a, w in (("attack", 4), ("attack1", 2), ("attack2", 2)) if a in self.c.sheets]
@@ -682,6 +714,44 @@ class Brain:
             if self.c.in_cave and self.c.state not in ("sleep", "lie_down"):
                 self._leave_cave_now()
 
+    def t_leap_falls(self, jump=None, start_near=False):
+        """Vai até uma ponta de um pulo (ex.: beira da cachoeira) e pula para a outra.
+        Às vezes pula de volta. `start_near`: começa da ponta onde já está (teclado)."""
+        jumps = getattr(self.world, "jumps", None)
+        if not jumps:
+            return
+        a, b = jump or self.rng.choice(jumps)
+        if math.hypot(b[0] - self.c.x, b[1] - self.c.y) < math.hypot(a[0] - self.c.x, a[1] - self.c.y):
+            a, b = b, a                       # começa pela ponta mais perto
+        if not start_near:
+            yield from self.walk_to(a, run=False)
+            if math.hypot(a[0] - self.c.x, a[1] - self.c.y) > 24:
+                return
+        self.face("right" if b[0] > self.c.x else "left")
+        yield from self.wait(0.3)
+        self.say("falls", 0.7)
+        anim = "double_jump" if "double_jump" in self.c.sheets else "jump"
+        yield from self._hop((self.c.x, self.c.y), b, anim)
+        self.boredom = max(0.0, self.boredom - 0.4)
+        yield from self.wait(self.rng.uniform(1, 2.5))
+        if not start_near and self.rng.random() < 0.4:     # e volta pulando
+            self.face("right" if a[0] > self.c.x else "left")
+            yield from self._hop((self.c.x, self.c.y), a, anim)
+            yield from self.wait(1)
+
+    def t_skate(self):
+        """Lago congelado: anda por cima do gelo de um ponto a outro."""
+        self.say("skate", 0.8)
+        for _ in range(self.rng.randint(2, 4)):
+            p = self.world.ice_point(self.rng)
+            if p is None:
+                return
+            yield from self.walk_to(p, run=False)
+            if self.rng.random() < 0.3:
+                yield from self.play("jump")
+        self.boredom = max(0.0, self.boredom - 0.4)
+        yield from self.wait(1)
+
     def wind_weight(self):
         if "cast" not in self.c.sheets:
             return 0
@@ -804,7 +874,7 @@ class Brain:
         for anim, hold in self.DRINK_ANIMS:  # abaixa e bebe
             yield from self.play(anim, hold=hold)
         self.thirst = 0.0
-        self.say("drink")
+        self.say("drink_ice" if getattr(self.world, "frozen", False) and "drink_ice" in self.LINES else "drink")
         yield from self.wait(2)
 
     def t_visit_pond(self):
@@ -815,14 +885,480 @@ class Brain:
         yield from self.play("look_down", hold=self.rng.uniform(3, 6))
         self.boredom = max(0.0, self.boredom - 0.2)
 
+    # ---------- ações do jogador (tecla E, actions.py) ----------
+    def t_player(self, gen):
+        """Ação pedida pelo jogador: faz e devolve o controle a ele (rotina pausada)."""
+        self.player_task = True
+        try:
+            yield from gen
+        finally:
+            self.player_task = False
+            self.manual = MANUAL_PAUSE
+            self.axis = (0.0, 0.0)
+
+    def t_hit_tree(self, tree):
+        """Golpe na árvore de frutas: ela balança e derruba uma fruta."""
+        self.face("left" if tree.x < self.c.x else "right")
+        self.say("fruit_hit", 0.5)
+        self.c.do_action("attack")
+        yield from self.wait(0.3)
+        tree.hit(self.c.facing)
+        while self.c.state == "attack":
+            yield
+
+    def t_pick_fruit(self, fruit):
+        """Abaixa, pega a fruta do chão e come."""
+        fruit.claimed = self.c
+        try:
+            self.face("left" if fruit.x < self.c.x else "right")
+            self.c.do_action("eat")
+            yield from self.wait(0.45)
+            fruit.eaten = True
+            while self.c.state == "eat":
+                yield
+            self.hunger = max(0.0, self.hunger - 0.6)
+            self.say("eat_fruit")
+        finally:
+            if not fruit.eaten and fruit.claimed is self.c:
+                fruit.claimed = None
+
+    def t_sit_here(self, bench, i):
+        """Senta no banco e fica até o jogador pedir para levantar (E) ou andar."""
+        self.stand_request = False
+        bench.occupied[i] = self.c
+        try:
+            ax, ay = bench.approach(i)
+            if math.hypot(ax - self.c.x, ay - self.c.y) > 4:
+                yield from self.walk_to((ax, ay), run=False)
+            self.sit_on(bench, i)
+            while self.c.seated_on and not self.stand_request:
+                yield
+            if self.c.seated_on and "bench_leave" in self.c.sheets:
+                yield from self.play("bench_leave")
+        finally:
+            self.stand_request = False
+            if bench.occupied.get(i) is self.c and not self.c.seated_on:
+                del bench.occupied[i]
+            self.leave_bench()
+
+    def t_enter_water(self, spot):
+        """Pula da margem para a água; depois o jogador nada com WASD."""
+        x, y, side, entry = spot
+        self.face(side)
+        yield from self._hop((self.c.x, self.c.y), entry)
+        self.c.swimming = True
+        yield from self.play("swim_enter")
+
+    def t_exit_water(self, spot):
+        """Da água de volta para a margem."""
+        x, y, side, entry = spot
+        self.face("left" if x < self.c.x else "right")
+        self.c.swimming = False
+        yield from self._hop((self.c.x, self.c.y), (x, y))
+
+    def t_leave_water(self):
+        """Está na água sem tarefa (o jogador largou nadando): nada até a beira e sai."""
+        spots = self._swim_spots()
+        if not spots:
+            self.c.swimming = False
+            self.c.x, self.c.y = self.world.nav_point((self.c.x, self.c.y))
+            return
+        spot = min(spots, key=lambda s: math.dist(s[3], (self.c.x, self.c.y)))
+        if self.world.clear_water((self.c.x, self.c.y), spot[3]):
+            yield from self._swim_to(spot[3])
+        else:
+            self.c.x, self.c.y = spot[3]
+        yield from self.t_exit_water(spot)
+
+    def dummy_spot(self, dummy):
+        """Onde ficar para bater no boneco (ao lado, perto o bastante)."""
+        w = self.world
+        reach = 14 + dummy.frames[0].get_width() * 0.2
+        first = 1 if self.c.x >= dummy.x else -1
+        for s in (first, -first):
+            p = (dummy.x + s * reach, dummy.y + 2)
+            if not w.blocked(self.c.feet_rect(*p)):
+                return p
+        return w.nav_point((dummy.x + first * reach, dummy.y + 6))
+
+    def t_train_dummy(self, dummy, walk=True):
+        """Treino no boneco: vai até ele e dá uma sequência de golpes (às vezes até quebrar)."""
+        if walk:
+            spot = self.dummy_spot(dummy)
+            yield from self.walk_to(spot)
+            if math.dist(spot, (self.c.x, self.c.y)) > 30:
+                return
+        self.say("train", 0.8)
+        moves = [a for a in ("attack", "attack1", "attack2") if a in self.c.sheets] or ["attack"]
+        for _ in range(self.rng.randint(3, 6)):
+            if dummy.destroyed:
+                break
+            self.face("left" if dummy.x < self.c.x else "right")
+            yield from self.play(self.rng.choice(moves))
+            yield from self.wait(self.rng.uniform(0.1, 0.4))
+        if dummy.destroyed:
+            self.say("train_end" if "train_end" in self.LINES else "jump", 0.9)
+        self.boredom = max(0.0, self.boredom - 0.4)
+        self.energy = max(0.0, self.energy - 0.015)
+        yield from self.wait(1.0)
+
+    def snowman_weight(self):
+        snowmen = getattr(self.world, "snowmen", [])
+        if not snowmen:
+            return 0
+        if any(s.destroyed and s.claimed in (None, self.c) for s in snowmen):
+            return 14
+        return 6 + 6 * self.boredom
+
+    def snowman_spot(self, sm):
+        """Onde ficar para bater ou montar o boneco de neve."""
+        w = self.world
+        reach = 14 + sm.frames[0].get_width() * 0.22
+        first = 1 if self.c.x >= sm.x else -1
+        for s in (first, -first):
+            p = (sm.x + s * reach, sm.y + 2)
+            if not w.blocked(self.c.feet_rect(*p)):
+                return p
+        return w.nav_point((sm.x + first * reach, sm.y + 6))
+
+    def t_build_snowman(self, sm=None, walk=True):
+        """Vai até o boneco de neve desmontado e monta etapa por etapa até ficar pronto."""
+        snowmen = [s for s in getattr(self.world, "snowmen", []) if s.destroyed and s.claimed in (None, self.c)]
+        if sm is None:
+            if not snowmen:
+                return
+            sm = min(snowmen, key=lambda s: math.dist((s.x, s.y), (self.c.x, self.c.y)))
+        sm.claimed = self.c
+        try:
+            if walk:
+                spot = self.snowman_spot(sm)
+                yield from self.walk_to(spot)
+                if math.dist(spot, (self.c.x, self.c.y)) > 34:
+                    return
+            self.face("left" if sm.x < self.c.x else "right")
+            self.say("snowman_build", 0.85)
+            steps = 0
+            while sm.destroyed and steps < 5:
+                steps += 1
+                self.face("left" if sm.x < self.c.x else "right")
+                if "eat" in self.c.sheets:
+                    self.c.do_action("eat")
+                    yield from self.wait(0.42)
+                    sm.build_step()
+                    while self.c.state == "eat":
+                        yield
+                else:
+                    yield from self.wait(0.35)
+                    sm.build_step()
+                yield from self.wait(0.28)
+            if sm.fully_built:
+                self.say("snowman_done", 0.95)
+                if "jump" in self.c.sheets and self.rng.random() < 0.65:
+                    yield from self.play("jump")
+            self.boredom = max(0.0, self.boredom - 0.45)
+            yield from self.wait(1.0)
+        finally:
+            if sm.claimed is self.c:
+                sm.claimed = None
+
+    def t_break_snowman(self, sm=None, walk=True):
+        """Vai até um boneco de neve montado e bate nele até desmontar."""
+        snowmen = [s for s in getattr(self.world, "snowmen", []) if not s.destroyed and s.claimed in (None, self.c)]
+        if sm is None:
+            if not snowmen:
+                return
+            sm = min(snowmen, key=lambda s: math.dist((s.x, s.y), (self.c.x, self.c.y)))
+        sm.claimed = self.c
+        try:
+            if walk:
+                spot = self.snowman_spot(sm)
+                yield from self.walk_to(spot)
+                if math.dist(spot, (self.c.x, self.c.y)) > 34:
+                    return
+            self.say("snowman_break", 0.85)
+            moves = [a for a in ("attack", "attack1", "attack2") if a in self.c.sheets] or ["attack"]
+            for _ in range(self.rng.randint(4, 6)):
+                if sm.destroyed:
+                    break
+                self.face("left" if sm.x < self.c.x else "right")
+                hp_before = sm.hp
+                yield from self.play(self.rng.choice(moves))
+                if sm.hp == hp_before and not sm.destroyed:
+                    sm.hit(self.c.facing)
+                yield from self.wait(self.rng.uniform(0.12, 0.32))
+            self.boredom = max(0.0, self.boredom - 0.4)
+            self.energy = max(0.0, self.energy - 0.015)
+            yield from self.wait(0.9)
+        finally:
+            if sm.claimed is self.c:
+                sm.claimed = None
+
+    def t_snowman(self):
+        """Rotina autônoma com os bonecos de neve: monta os desmontados ou quebra e remonta."""
+        snowmen = getattr(self.world, "snowmen", [])
+        broken = [s for s in snowmen if s.destroyed and s.claimed in (None, self.c)]
+        if broken:
+            sm = min(broken, key=lambda s: math.dist((s.x, s.y), (self.c.x, self.c.y)))
+            yield from self.t_build_snowman(sm, walk=True)
+            return
+        intact = [s for s in snowmen if not s.destroyed and s.claimed in (None, self.c)]
+        if intact:
+            sm = min(intact, key=lambda s: math.dist((s.x, s.y), (self.c.x, self.c.y)))
+            yield from self.t_break_snowman(sm, walk=True)
+            if sm.destroyed and self.rng.random() < 0.55:
+                yield from self.wait(self.rng.uniform(0.6, 1.4))
+                yield from self.t_build_snowman(sm, walk=False)
+
+    def campfire_weight(self):
+        fires = getattr(self.world, "campfires", [])
+        if not fires:
+            return 0
+        night = self.env.phase in ("Entardecer", "Noite")
+        if any(not f.lit for f in fires):
+            return 14 if night else 8
+        return 10 if night else 5
+
+    def campfire_spot(self, cf):
+        """Onde parar ao lado da fogueira."""
+        w = self.world
+        reach = 18 + cf.frames[0].get_width() * 0.28
+        first = 1 if self.c.x >= cf.x else -1
+        for s in (first, -first):
+            p = (cf.x + s * reach, cf.y + 4)
+            if not w.blocked(self.c.feet_rect(*p)):
+                return p
+        return w.nav_point((cf.x + first * reach, cf.y + 6))
+
+    def t_toggle_campfire(self, cf=None, walk=True):
+        """Vai até a fogueira e acende (se apagada) ou apaga (se acesa)."""
+        fires = getattr(self.world, "campfires", [])
+        if cf is None:
+            if not fires:
+                return
+            cf = min(fires, key=lambda f: math.dist((f.x, f.y), (self.c.x, self.c.y)))
+        cf.claimed = self.c
+        try:
+            if walk:
+                spot = self.campfire_spot(cf)
+                yield from self.walk_to(spot)
+                if math.dist(spot, (self.c.x, self.c.y)) > 36:
+                    return
+            self.face("left" if cf.x < self.c.x else "right")
+            if "eat" in self.c.sheets:
+                self.c.do_action("eat")
+                yield from self.wait(0.38)
+                cf.toggle()
+                while self.c.state == "eat":
+                    yield
+            else:
+                yield from self.wait(0.3)
+                cf.toggle()
+            self.say("fire_light" if cf.lit else "fire_douse", 0.9)
+            self.boredom = max(0.0, self.boredom - 0.25)
+            yield from self.wait(0.8)
+        finally:
+            if cf.claimed is self.c:
+                cf.claimed = None
+
+    def t_campfire(self):
+        """Rotina na fogueira: acende se estiver apagada e se aquece perto do fogo."""
+        fires = getattr(self.world, "campfires", [])
+        if not fires:
+            return
+        unlit = [f for f in fires if not f.lit and f.claimed in (None, self.c)]
+        cf = min(unlit or fires, key=lambda f: math.dist((f.x, f.y), (self.c.x, self.c.y)))
+        spot = self.campfire_spot(cf)
+        yield from self.walk_to(spot, run=False)
+        if math.dist(spot, (self.c.x, self.c.y)) > 36:
+            return
+        self.face("left" if cf.x < self.c.x else "right")
+        if not cf.lit:
+            yield from self.t_toggle_campfire(cf, walk=False)
+        self.say("fire_warm", 0.85)
+        yield from self.wait(self.rng.uniform(4.0, 8.0))
+        self.boredom = max(0.0, self.boredom - 0.35)
+
+    def grub_natal_weight(self):
+        grubs = getattr(self.world, "grubs_natal", [])
+        if not grubs:
+            return 0
+        if any(g.state == "jar" and g.claimed in (None, self.c) for g in grubs):
+            return 14
+        return 8 + 4 * self.boredom
+
+    def grub_natal_spot(self, gn):
+        """Onde ficar ao lado do Grub de Natal."""
+        w = self.world
+        reach = 14 + gn.frames[0].get_width() * 0.22
+        first = 1 if self.c.x >= gn.x else -1
+        for s in (first, -first):
+            p = (gn.x + s * reach, gn.y + 2)
+            if not w.blocked(self.c.feet_rect(*p)):
+                return p
+        return w.nav_point((gn.x + first * reach, gn.y + 6))
+
+    def t_free_grub_natal(self, gn=None, walk=True):
+        """Vai até o pote do Grub de Natal e bate nele até libertar o Grub."""
+        grubs = [g for g in getattr(self.world, "grubs_natal", []) if g.state == "jar" and g.claimed in (None, self.c)]
+        if gn is None:
+            if not grubs:
+                return
+            gn = min(grubs, key=lambda g: math.dist((g.x, g.y), (self.c.x, self.c.y)))
+        gn.claimed = self.c
+        try:
+            if walk:
+                spot = self.grub_natal_spot(gn)
+                yield from self.walk_to(spot)
+                if math.dist(spot, (self.c.x, self.c.y)) > 36:
+                    return
+            moves = [a for a in ("attack", "attack1", "attack2") if a in self.c.sheets] or ["attack"]
+            for _ in range(4):
+                if gn.state != "jar":
+                    break
+                self.face("left" if gn.x < self.c.x else "right")
+                hp_before = gn.hp
+                yield from self.play(self.rng.choice(moves))
+                if gn.hp == hp_before and gn.state == "jar":
+                    gn.hit(self.c.facing)
+                yield from self.wait(self.rng.uniform(0.12, 0.28))
+            while gn.state == "shattering":
+                yield
+            self.say("grub_free", 0.95)
+            if "jump" in self.c.sheets and self.rng.random() < 0.7:
+                yield from self.play("jump")
+            self.boredom = max(0.0, self.boredom - 0.45)
+            yield from self.wait(1.2)
+        finally:
+            if gn.claimed is self.c:
+                gn.claimed = None
+
+    def t_play_grub_natal(self, gn=None, walk=True):
+        """Brinca com o Grub livre (ele mergulha na neve) ou chama ele do montinho de neve."""
+        grubs = getattr(self.world, "grubs_natal", [])
+        if gn is None:
+            if not grubs:
+                return
+            gn = min(grubs, key=lambda g: math.dist((g.x, g.y), (self.c.x, self.c.y)))
+        gn.claimed = self.c
+        try:
+            if walk:
+                spot = self.grub_natal_spot(gn)
+                yield from self.walk_to(spot)
+                if math.dist(spot, (self.c.x, self.c.y)) > 36:
+                    return
+            self.face("left" if gn.x < self.c.x else "right")
+            if "eat" in self.c.sheets:
+                self.c.do_action("eat")
+                yield from self.wait(0.35)
+                gn.interact()
+                while self.c.state == "eat":
+                    yield
+            else:
+                yield from self.wait(0.3)
+                gn.interact()
+            self.say("grub_play", 0.9)
+            if "jump" in self.c.sheets and self.rng.random() < 0.5:
+                yield from self.play("jump")
+            self.boredom = max(0.0, self.boredom - 0.35)
+            yield from self.wait(1.0)
+        finally:
+            if gn.claimed is self.c:
+                gn.claimed = None
+
+    def t_grub_natal(self):
+        """Rotina com o Grub de Natal: liberta do pote ou brinca com ele na neve."""
+        grubs = [g for g in getattr(self.world, "grubs_natal", []) if g.claimed in (None, self.c)]
+        if not grubs:
+            return
+        gn = min(grubs, key=lambda g: math.dist((g.x, g.y), (self.c.x, self.c.y)))
+        if gn.state == "jar":
+            yield from self.t_free_grub_natal(gn, walk=True)
+        else:
+            yield from self.t_play_grub_natal(gn, walk=True)
+
+    def _can_eat(self):
+        """Tem comida? (fruta no chão, árvore com frutas, ou plantas/florzinhas)"""
+        w = self.world
+        return (any(f.landed and f.claimed in (None, self.c) for f in getattr(w, "fruits", []))
+                or any(t.fruits > 0 for t in getattr(w, "fruit_trees", [])) or bool(self._food()))
+
     def t_eat(self):
+        w = self.world
+        if any(f.landed and f.claimed in (None, self.c) for f in getattr(w, "fruits", [])) \
+                or any(t.fruits > 0 for t in getattr(w, "fruit_trees", [])):
+            yield from self.t_eat_fruit()
+            return
+        yield from self._t_eat_plant()
+
+    def t_eat_fruit(self):
+        """Com fome: pega uma fruta do chão; se não tiver, bate numa árvore de frutas para
+        derrubar uma, espera ela cair, pega e come."""
+        w = self.world
+        self.say("hungry", 0.8)
+        free = [f for f in w.fruits if f.landed and f.claimed in (None, self.c)]
+        fruit = min(free, key=lambda f: (f.x - self.c.x) ** 2 + (f.y - self.c.y) ** 2) if free else None
+        if fruit is None:
+            trees = sorted((t for t in w.fruit_trees if t.fruits > 0),
+                           key=lambda t: (t.x - self.c.x) ** 2 + (t.y - self.c.y) ** 2)
+            if not trees:
+                return
+            tree = trees[0]
+            # fica ao lado do tronco, virado para a árvore
+            reach = max(14.0, tree.frames[0].get_width() * 0.2)
+            side = 1 if self.c.x >= tree.x else -1
+            spot = None
+            for s in (side, -side):
+                p = (tree.x + s * reach, tree.y + 2)
+                if not w.blocked(self.c.feet_rect(*p)):
+                    spot = p
+                    break
+            spot = spot or w.nav_point((tree.x + side * reach, tree.y + 6))
+            yield from self.walk_to(spot)
+            if math.hypot(spot[0] - self.c.x, spot[1] - self.c.y) > 30:
+                return
+            self.face("left" if tree.x < self.c.x else "right")
+            self.say("fruit_hit", 0.7)
+            self.c.do_action("attack")
+            yield from self.wait(0.3)
+            fruit = tree.hit(self.c.facing)
+            while self.c.state == "attack":
+                yield
+            if fruit is None:
+                return
+            t = 0.0
+            while not fruit.landed and t < 3:
+                yield
+                t += self.dt
+        fruit.claimed = self.c
+        try:
+            # vai até a fruta (para do lado) e pega do chão
+            side = 1 if self.c.x >= fruit.x else -1
+            spot = w.nav_point((fruit.x + side * 12 * CHARACTER_SCALE, fruit.y + 2))
+            if math.hypot(spot[0] - self.c.x, spot[1] - self.c.y) > 6:
+                yield from self.walk_to(spot)
+            if math.hypot(fruit.x - self.c.x, fruit.y - self.c.y) > 45 or fruit.eaten:
+                return
+            self.face("left" if fruit.x < self.c.x else "right")
+            self.c.do_action("eat")                     # abaixa e pega
+            yield from self.wait(0.45)
+            fruit.eaten = True
+            while self.c.state == "eat":
+                yield
+            self.hunger = max(0.0, self.hunger - 0.6)
+            self.say("eat_fruit")
+            yield from self.wait(1.5)
+        finally:
+            if not fruit.eaten and fruit.claimed is self.c:
+                fruit.claimed = None
+
+    def _t_eat_plant(self):
         self.say("hungry", 0.8)
         foods = sorted(self._food(), key=lambda d: (d.x - self.c.x) ** 2 + (d.y - self.c.y) ** 2)
         plant = self.rng.choice(foods[:5])
         # fica ao lado da planta, virado para ela
         first = self.rng.choice((-1, 1))
         for side in (first, -first):
-            spot = (plant.x + side * 34, plant.y + 2)
+            spot = (plant.x + side * 34 * CHARACTER_SCALE, plant.y + 2)
             if not self.world.blocked(self.c.feet_rect(*spot)):
                 break
         yield from self.walk_to(spot)
@@ -918,9 +1454,18 @@ HORNET_LINES = {
     "shade_see":  ["Uma sombra...", "Vazio.", "Tsc. Aquilo de novo.", "Fique longe."],
     "shade_ask":  ["Saia daqui.", "O que você quer?", "Hm..."],
     "shade_gone": ["Foi embora.", "Hm. Melhor assim."],
+    "xmas":       ["Neve. Hm.", "Frio.", "...Enfeites. Hm."],
     "needolin":   ["Ouça.", "Uma canção antiga.", "...", "*toca a agulha*"],
     "needolin_night": ["Para a noite.", "Uma canção de casa.", "..."],
     "needolin_end": ["Hm.", "Basta por hoje.", "..."],
+    "snowman_build": ["Hm. Vou refazer isso.", "Essa neve serve.", "Falta o manto.", "Quase pronto."],
+    "snowman_done":  ["Pronto. Nada mal.", "Hm. Ficou parecido.", "Aí está."],
+    "snowman_break": ["Shaw!", "Alvo de neve.", "Hegale!", "Vamos testar isso."],
+    "fire_light": ["Fogo aceso.", "Hm. Mais quente.", "Bom contra o frio."],
+    "fire_douse": ["Apagada.", "Chega de fogo por agora.", "Hm."],
+    "fire_warm":  ["Bom calor.", "Uma pausa perto do fogo.", "..."],
+    "grub_free":  ["Saia daí, pequeno.", "Hm. Livre.", "Mais um salvo."],
+    "grub_play":  ["Criatura barulhenta...", "Hm. Se escondeu na neve.", "..."],
 }
 
 
@@ -946,6 +1491,9 @@ class HornetBrain(Brain):
             ("banco", self.t_bench, self.bench_weight()),
             ("pular", self.t_jump, 3 + 5 * self.boredom),
             ("tocar", self.t_needolin, self.needolin_weight()),
+            ("boneco de neve", self.t_snowman, self.snowman_weight()),
+            ("fogueira", self.t_campfire, self.campfire_weight()),
+            ("grub de natal", self.t_grub_natal, self.grub_natal_weight()),
         ]
         if self.thirst > 0.45 and self.world.shore:
             options.append(("beber", self.t_drink, 18))
@@ -1045,7 +1593,10 @@ DAUGHTER_LINES = {
     "drink":      ["fresca.", "que delícia.", "ah, melhor."],
     "hungry":     ["estou com fome.", "aquelas flores parecem boas."],
     "eat":        ["doce.", "hm, gostoso.", "que perfume."],
+    "fruit_hit":  ["com licença, árvore.", "só uma...", "hah!"],
+    "eat_fruit":  ["que doce.", "cereja fresquinha.", "hm, delícia."],
     "train":      ["só um pouco.", "ainda lembro como.", "hah!"],
+    "train_end":  ["desculpe, boneco.", "ops.", "hihi, quebrou."],
     "jump":       ["upa!", "hihi", "leve!"],
     "look_up":    ["que céu...", "as nuvens vão tão longe.", "o que há lá em cima?"],
     "stars":      ["as estrelas...", "pareciam mais perto em casa.", "tantas luzes."],
@@ -1075,12 +1626,25 @@ DAUGHTER_LINES = {
     "remember":   ["casa...", "tudo mudou.", "pai...", "eu me lembro.", "quanto tempo..."],
     "watch":      ["o que será que ele faz?", "pequeno andarilho...", "*observa*", "ele não para."],
     "dance":      ["*gira*", "hihi", "lá lá lá..."],
+    "xmas":       ["neve... que lindo.", "feliz natal, pequeno.", "a casinha está quentinha.", "que árvore bonita."],
+    "skate":      ["cuidado, escorrega...", "hihi, que divertido!", "o lago virou espelho."],
+    "drink_ice":  ["*quebra o gelinho*", "gelada...", "brr."],
+    "falls":      ["segura...!", "hihi, molhei a capa", "que salto!", "a cachoeira canta."],
+    "snowman_build": ["vamos montar de novo.", "que neve fofinha...", "falta o cachecol.", "vai ficar lindo."],
+    "snowman_done":  ["prontinho!", "hihi, ficou parecido!", "que fofo!", "tão bonitinho."],
+    "snowman_break": ["com licença, bonequinho...", "ops, desculpa!", "hihi, neve!"],
+    "fire_light": ["que fogo quentinho...", "pronto, acesa.", "a luz é tão aconchegante."],
+    "fire_douse": ["apaguei com cuidado.", "só a fumacinha...", "até mais, fogueira."],
+    "fire_warm":  ["tão quentinho...", "*aquece as mãos*", "que paz perto do fogo."],
+    "grub_free":  ["pronto, pequenino, está livre.", "que gorrinho lindo!", "hihi, ele está feliz."],
+    "grub_play":  ["cuidado para não congelar na neve.", "hihi, só o gorrinho aparece!", "tão fofo."],
 }
 
 
 class DaughterBrain(Brain):
     LINES = DAUGHTER_LINES
-    SOCIAL_OK = Brain.SOCIAL_OK + ("colher flores", "lembrar", "observar", "dançar", "sentir o vento")
+    SOCIAL_OK = Brain.SOCIAL_OK + ("colher flores", "lembrar", "observar", "dançar", "sentir o vento", "patinar",
+                                   "pular a cachoeira")
 
     def choose(self):
         night = self.env.phase == "Noite"
@@ -1088,7 +1652,7 @@ class DaughterBrain(Brain):
             return "dormir", self.t_sleep(night)
         if self.thirst > NEED_THRESHOLD and self.world.shore:
             return "beber", self.t_drink()
-        if self.hunger > NEED_THRESHOLD and self._food():
+        if self.hunger > NEED_THRESHOLD and self._can_eat():
             return "comer", self.t_eat()
         knight = next((o for o in self.others if o.area == self.c.area and o.name == "Knight"), None)
         options = [
@@ -1104,10 +1668,15 @@ class DaughterBrain(Brain):
             ("dançar", self.t_dance, 3 + 8 * self.boredom),
             ("observar", self.t_watch, 8 if knight is not None else 0),
             ("treinar", self.t_train, 2),
+            ("patinar", self.t_skate, 5 if getattr(self.world, "frozen", False) else 0),
+            ("pular a cachoeira", self.t_leap_falls, 3 if getattr(self.world, "jumps", None) else 0),
+            ("boneco de neve", self.t_snowman, self.snowman_weight()),
+            ("fogueira", self.t_campfire, self.campfire_weight()),
+            ("grub de natal", self.t_grub_natal, self.grub_natal_weight()),
         ]
         if self.thirst > 0.45 and self.world.shore:
             options.append(("beber", self.t_drink, 20))
-        if self.hunger > 0.45 and self._food():
+        if self.hunger > 0.45 and self._can_eat():
             options.append(("comer", self.t_eat, 20))
         names, fns, weights = zip(*options)
         i = self.rng.choices(range(len(fns)), weights=weights)[0]
@@ -1121,7 +1690,7 @@ class DaughterBrain(Brain):
             first = self.rng.choice((-1, 1))
             spot = None
             for side in (first, -first):
-                p = (plant.x + side * 34, plant.y + 2)
+                p = (plant.x + side * 34 * CHARACTER_SCALE, plant.y + 2)
                 if not self.world.blocked(self.c.feet_rect(*p)):
                     spot = p
                     break
@@ -1194,6 +1763,7 @@ GRUB_LINES = {
     "morning":    ["dia!", "sol!"],
     "stars":      ["estrelinhas!"],
     "shade_see":  ["medo!!", "buáá!", "fantasma!", "*treme*"],
+    "xmas":       ["neve!!", "natal!", "brrr", "presente?"],
     "listen":     ["música!", "lalala!", "hihi, que bonito", "*balança*"],
     "listen_end": ["de novo!", "eba!!", "mais!"],
 }
@@ -1275,3 +1845,107 @@ class GrubBrain(Brain):
         yield from self.burrow_to(target)
         self.say("arrive", 0.3)
         yield from self.wait(1)
+
+
+# ==========================================================================
+# HOLLOW (Receptáculo Puro) — silencioso, solene e protetor. Caminha com calma
+# pela ilha, vigia os irmãos, contempla o céu e o lago, descansa no banco e
+# participa das atividades do cenário.
+HOLLOW_LINES = {
+    "greet":      ["...", "*inclina a cabeça*", "*acena em silêncio*", "...olá."],
+    "bored":      ["...", "*olha o horizonte*", "*ajeita o manto*"],
+    "wander":     ["...", "*passos calmos*", "*caminha em silêncio*"],
+    "idle":       ["...", "*vigia em silêncio*", "*vento no manto*", "...paz."],
+    "sleepy":     ["...", "*fecha os olhos devagar*", "...descansar."],
+    "sleeping":   ["...", "...zz..."],
+    "wake_day":   ["...", "*ergue a cabeça*", "...amanheceu."],
+    "wake_nap":   ["...", "*desperta*"],
+    "wake_night": ["...", "*olha a noite*"],
+    "thirsty":    ["...", "*vai até a margem*"],
+    "drink":      ["...", "*observa o reflexo na água*"],
+    "hungry":     ["...", "*olha as flores*"],
+    "eat":        ["...", "*toca a flor com cuidado*"],
+    "fruit_hit":  ["...", "*golpe preciso*"],
+    "eat_fruit":  ["...", "*segura a fruta*"],
+    "train":      ["...", "*postura firme*", "*lampejo do ferrão*"],
+    "train_end":  ["...", "*embainha o ferrão*"],
+    "jump":       ["...", "*salto leve*"],
+    "look_up":    ["...", "*contempla o céu*"],
+    "stars":      ["...", "*observa as estrelas*"],
+    "pond":       ["...", "*olha o lago calmo*"],
+    "rain_start": ["...", "*olha as gotas caindo*"],
+    "rain":       ["...", "*a chuva escorre pelo manto*"],
+    "thunder":    ["...!", "*ergue o olhar*"],
+    "hot":        ["...", "*calor silencioso*"],
+    "night":      ["...", "*vigília noturna*"],
+    "evening":    ["...", "*observa o entardecer*"],
+    "morning":    ["...", "*luz da manhã*"],
+    "bench":      ["...", "*descansa em silêncio*"],
+    "bench_night": ["...", "*guarda a noite em silêncio*"],
+    "shade_see":  ["...!", "*encara o Vazio*"],
+    "shade_ask":  ["...", "*reconhece a sombra*"],
+    "shade_gone": ["...", "*observa onde ela sumiu*"],
+    "listen":     ["...", "*escuta a canção em silêncio*"],
+    "listen_end": ["...", "*inclina a cabeça em respeito*"],
+    "xmas":       ["...", "*observa a neve caindo*", "*flocos no manto*"],
+    "skate":      ["...", "*desliza pelo gelo*"],
+    "drink_ice":  ["...", "*toca o gelo*"],
+    "falls":      ["...", "*salta sobre a cachoeira*"],
+    "snowman_build": ["...", "*molda a neve com cuidado*"],
+    "snowman_done":  ["...", "*admira o boneco de neve*"],
+    "snowman_break": ["...", "*desfaz o monte de neve*"],
+    "fire_light": ["...", "*acende as chamas*"],
+    "fire_douse": ["...", "*apaga as brasas*"],
+    "fire_warm":  ["...", "*observa o fogo crepitar*"],
+    "grub_free":  ["...", "*liberta o pequeno Grub*"],
+    "grub_play":  ["...", "*observa o Grub na neve*"],
+    "guard":      ["...", "*vigia os pequenos*", "*olha ao redor com calma*"],
+}
+
+
+class HollowBrain(Brain):
+    LINES = HOLLOW_LINES
+    HAS_HUNGER = False
+    HAS_THIRST = False
+    SOCIAL_OK = Brain.SOCIAL_OK + ("vigiar",)
+
+    def choose(self):
+        night = self.env.phase == "Noite"
+        if self.energy < SLEEP_THRESHOLD or (night and self.energy < NIGHT_SLEEP_THRESHOLD):
+            return "dormir", self.t_sleep(night)
+        if self.env.rain > 0.3 and self.find_cave() and self.rng.random() < 0.65:
+            return "abrigo", self.t_shelter()
+        options = [
+            ("passear", self.t_wander, 42 + 25 * self.boredom),
+            ("parado", self.t_idle, 20),
+            ("vigiar", self.t_guard, 14 if self.others else 0),
+            ("olhar o céu", self.t_look_up, 8 + (8 if night else 0)),
+            ("ver o lago", self.t_visit_pond, 6 if self.world.shore else 0),
+            ("banco", self.t_bench, self.bench_weight() * 1.5),
+            ("pular", self.t_jump, 3 + 4 * self.boredom),
+            ("patinar", self.t_skate, 6 if getattr(self.world, "frozen", False) else 0),
+            ("pular a cachoeira", self.t_leap_falls, 4 if getattr(self.world, "jumps", None) else 0),
+            ("boneco de neve", self.t_snowman, self.snowman_weight()),
+            ("fogueira", self.t_campfire, self.campfire_weight()),
+            ("grub de natal", self.t_grub_natal, self.grub_natal_weight()),
+        ]
+        names, fns, weights = zip(*options)
+        i = self.rng.choices(range(len(fns)), weights=weights)[0]
+        return names[i], fns[i]()
+
+    def t_guard(self):
+        """Aproxima-se calmamente de outro morador e vigia por alguns instantes."""
+        peers = [o for o in self.others if o.area == self.c.area and not o.in_cave]
+        if not peers:
+            return
+        target_char = self.rng.choice(peers)
+        side = 1 if self.c.x > target_char.x else -1
+        spot = self.world.nav_point((target_char.x + side * 145, target_char.y + self.rng.uniform(-25, 25)))
+        yield from self.walk_to(spot, run=False)
+        self.say("guard", 0.6)
+        t, until = 0.0, self.rng.uniform(5, 11)
+        while t < until:
+            self.face("right" if target_char.x > self.c.x else "left")
+            yield
+            t += self.dt
+        self.boredom = max(0.0, self.boredom - 0.25)

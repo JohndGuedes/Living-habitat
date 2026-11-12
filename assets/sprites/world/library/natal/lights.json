@@ -1,0 +1,13 @@
+{
+  "_info": "Luzes dos itens da biblioteca, em px da imagem do item. Chaves = nome do PNG. Lista simples [[x, y], ...] = lanternas (luz quente). Em \"bulbs\": lâmpadas de pisca-pisca (piscam coloridas). Acendem à noite (props.Item.draw_light).",
+  "poste_guirlanda": [[108, 98]],
+  "poste": [[107, 97]],
+  "pilar_lanterna": [[145, 85]],
+  "pilar_lanterna_2": [[18, 88]],
+  "poste_curvo": [[65, 75]],
+  "estatua_lanterna": [[80, 90]],
+  "bulbs": {
+    "pisca_pisca": [[27, 22], [41, 19], [34, 34], [51, 35], [60, 41], [78, 37], [19, 46], [6, 54],
+                    [22, 61], [37, 51], [45, 64], [55, 58], [64, 61]]
+  }
+}

@@ -106,6 +106,32 @@ def sway_poses(img: pygame.Surface, amp: float, n: int = POSES):
     return poses, pad
 
 
+def soft_sway_poses(img: pygame.Surface, amp: float, n: int = POSES, up: int = 3, curve: float = 1.6):
+    """Como sway_poses, mas com deslocamento de fração de pixel (feito numa cópia `up`x
+    maior e reduzida com suavização): para balanços bem leves (1-2 px), sem "degraus".
+    Retorna (poses, margem lateral)."""
+    w, h = img.get_size()
+    pad = math.ceil(amp) + 1
+    big = pygame.transform.scale(img, (w * up, h * up))    # sem suavizar: parada = idêntica
+    H = h * up
+    poses = []
+    for k in range(n):
+        a = (-amp + 2 * amp * k / (n - 1)) * up
+        s = pygame.Surface(((w + 2 * pad) * up, H), pygame.SRCALPHA)
+        for y in range(0, H, 2):
+            off = a * ((H - y) / H) ** curve
+            s.blit(big, (pad * up + round(off), y), (0, y, w * up, 2))
+        poses.append(pygame.transform.smoothscale(s, (w + 2 * pad, h)))
+    return poses, pad
+
+
+def breeze(t: float, phase: float, freq: float, wind: float = 1.0) -> float:
+    """Brisa leve e irregular, de -1 a 1 (wind > 1 = chuva/vento: balança mais)."""
+    x = t * math.tau * freq + phase
+    v = math.sin(x) * 0.7 + math.sin(x * 2.3 + 1.7) * 0.3
+    return max(-1.0, min(1.0, v * min(1.0, 0.6 + 0.25 * (wind - 1))))
+
+
 _POSE_CACHE: dict = {}
 
 
