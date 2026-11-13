@@ -9,6 +9,7 @@ Tecla O liga/desliga. Com o editor ligado (os personagens ficam parados):
   setas                  ajuste fino (Shift = 10x)
   Tab                    próximo objeto
   Delete                 remove o objeto selecionado
+  F ou H                 inverte horizontalmente (espelhar esquerda/direita)
   K                      sólido / atravessável (se bloqueia a passagem)
   Backspace              volta o objeto ao que está em scene.py (só os de lá)
   Ctrl+S ou Enter        salva em layout.json (vira o padrão ao abrir o jogo)
@@ -39,7 +40,7 @@ ITEM_SCALE = 0.3          # tamanho inicial dos itens da biblioteca (relativo à
 PANEL_W = 300
 CELL = 92
 
-HELP = ("EDITOR | arrastar: mover | roda, + -: tamanho | setas: ajuste (Shift x10) | Tab: próximo | "
+HELP = ("EDITOR | arrastar: mover | roda, + -: tamanho | setas: ajuste (Shift x10) | F/H: inverter | Tab: próximo | "
         "Del: remover | K: sólido | L: biblioteca | Ctrl+S/Enter: salvar | O/Esc: sair")
 
 
@@ -74,6 +75,7 @@ class Editor:
             for ch in g.characters:           # ninguém sentado/andando enquanto edita
                 ch.brain._drop_task()
                 ch.brain.leave_bench()
+                ch.brain.leave_bed()
                 ch.brain.task_name = "editor"
                 if ch.state not in ("sleep", "lie_down"):
                     ch.state = "idle"
@@ -150,6 +152,17 @@ class Editor:
         self.dirty = True
         self.game.show("sólido (bloqueia)" if solid else "atravessável")
 
+    def _toggle_flip(self, i):
+        d = self.world.prop_defs[i]
+        flipped = not bool(d.get("flip", False))
+        if flipped:
+            d["flip"] = True
+        else:
+            d.pop("flip", None)
+        self._rebuild(i)
+        self.dirty = True
+        self.game.show("invertido horizontalmente" if flipped else "orientação original")
+
     def add(self, name, file, at=None):
         """Coloca um item da biblioteca (no meio da tela, ou em `at`)."""
         w = self.world
@@ -169,6 +182,8 @@ class Editor:
             d.update(kind="campfire", scale=0.9)
         elif name.lower().startswith(("grub_natal", "group-natal", "group_natal")):
             d.update(kind="grub_natal", scale=0.85)
+        elif name.lower().startswith("cama"):
+            d.update(kind="bed", scale=0.54, approach_rel=0.20)
         w.prop_defs.append(d)
         w.props.append(make_prop(w._place(d)))
         w.props[-1].world = w
@@ -181,7 +196,12 @@ class Editor:
         if self._items is None:
             self._items = []
             for group, name, file in library_items():
-                img = pygame.image.load(str(SPRITES_DIR / file)).convert_alpha()
+                path = SPRITES_DIR / file
+                try:
+                    img = pygame.image.load(str(path)).convert_alpha()
+                except (pygame.error, OSError) as exc:
+                    log.warning("não foi possível carregar item da biblioteca %s: %s", file, exc)
+                    continue
                 k = min((CELL - 10) / img.get_width(), (CELL - 22) / img.get_height(), 1.0)
                 self._items.append((group, name, file, pygame.transform.smoothscale_by(img, k)))
         return self._items
@@ -228,6 +248,18 @@ class Editor:
                 self.sel = max(hits, key=lambda i: w.props[i].y)   # o da frente
                 p = w.props[self.sel]
                 self.drag = (pos[0] - p.x, pos[1] - p.y)
+            return True
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+            if win._hovered():
+                return False
+            pos = win.to_canvas(event.pos)
+            if self.panel and self._panel_rect().collidepoint(pos):
+                return True
+            if w.props:
+                hits = [i for i, p in enumerate(w.props) if self._rect(p).collidepoint(pos)]
+                if hits:
+                    self.sel = max(hits, key=lambda i: w.props[i].y)
+                self._toggle_flip(self.sel)
             return True
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self.drag = None
@@ -276,6 +308,8 @@ class Editor:
             self.sel = (self.sel + 1) % len(w.props)
         elif key == pygame.K_DELETE:
             self._remove(self.sel)
+        elif key in (pygame.K_f, pygame.K_h):
+            self._toggle_flip(self.sel)
         elif key == pygame.K_k:
             self._toggle_solid(self.sel)
         elif key == pygame.K_BACKSPACE:
@@ -325,8 +359,9 @@ class Editor:
             x, y = d["img_pos"]
             label = d.get("name") or d.get("kind")
             solid = "sólido" if w.props[self.sel].solid is not None else "atravessável"
+            flip_txt = "   invertido" if d.get("flip") else ""
             lines.append(f"[{self.sel + 1}/{len(w.props)}] {label}   posição ({x:.0f}, {y:.0f})   "
-                         f"tamanho {d.get('scale', 1):.2f}   {solid}   estação: {w.season}"
+                         f"tamanho {d.get('scale', 1):.2f}   {solid}{flip_txt}   estação: {w.season}"
                          + ("   * não salvo" if self.dirty else ""))
         else:
             lines.append(f"esta área não tem objetos (L abre a biblioteca)   estação: {w.season}")

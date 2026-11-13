@@ -186,6 +186,7 @@ class Game:
             b = ch.brain
             b._drop_task()
             b.leave_bench()
+            b.leave_bed()
             ch.swimming = ch.in_cave = ch.pinned = False
             if ch.state not in ("sleep", "lie_down"):
                 ch.state = "idle"
@@ -287,13 +288,16 @@ class Game:
             else:
                 obj.draw(self.screen, viewer=c)
         self.world.fairies.draw(self.screen)                   # fadinhas voam por cima de tudo
-        self.env.apply_light(self.screen)                      # noite / tarde / céu nublado
-        self.world.draw_lights(self.screen, self.env.darkness)  # fogueira, janelas, poste
+        if not self.world.indoor:
+            self.env.apply_light(self.screen)                  # noite / tarde / céu nublado
+        darkness = max(0.35, self.env.darkness * 0.65) if self.world.indoor else self.env.darkness
+        self.world.draw_lights(self.screen, darkness)          # fogueira, lareira, janelas, poste
         for ch in here:
-            ch.draw_light(self.screen, self.env.darkness)       # lanterna do Knight
-        if self.shade:
+            ch.draw_light(self.screen, darkness)               # lanterna do Knight
+        if self.shade and not self.world.indoor:
             self.shade.draw(self.screen)                       # a Sombra (não escurece)
-        self.env.draw_weather(self.screen)                     # chuva e relâmpagos
+        if not self.world.indoor:
+            self.env.draw_weather(self.screen)                 # chuva/neve e relâmpagos (só lá fora)
         if not in_menu:
             for ch in here:
                 ch.draw_speech(self.screen)                    # balões de fala
@@ -318,7 +322,7 @@ class Game:
     def draw_shadows_and_reflections(self, here):
         """Sombras do sol (personagens e objetos) e reflexos no gelo, no chão (antes de tudo)."""
         w, s = self.world, self.screen
-        sun = self.env.sun()
+        sun = None if w.indoor else self.env.sun()
         if sun:
             for p in w.props:
                 img = p.shadow_image()                # sem o balanço da brisa (cache de sombras)
@@ -339,7 +343,7 @@ class Game:
     def separate(self, dt, chars=None, min_dist=46 * CHARACTER_SCALE):
         """Personagens muito colados se afastam devagar (um não some atrás do outro)."""
         chars = [c for c in (chars if chars is not None else self.characters)
-                 if c.state not in ("sleep", "lie_down") and not c.seated_on and not c.in_cave]
+                 if c.state not in ("sleep", "lie_down") and not c.seated_on and not c.sleeping_in and not c.in_cave]
         for i, a in enumerate(chars):
             for b in chars[i + 1:]:
                 dx, dy = b.x - a.x, (b.y - a.y) * 2      # profundidade conta mais

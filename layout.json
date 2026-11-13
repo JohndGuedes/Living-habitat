@@ -3,8 +3,8 @@
     {
       "kind": "bench",
       "img_pos": [
-        1219.1,
-        1077.8
+        1246.2,
+        709.5
       ],
       "file": "items/town_bench_lit.png",
       "scale": 1.0,
@@ -38,8 +38,8 @@
       "kind": "item",
       "file": "world/library/natal/poste.png",
       "img_pos": [
-        1096.3,
-        1082.0
+        1133.1,
+        678.1
       ],
       "scale": 0.967,
       "name": "poste"
@@ -48,8 +48,8 @@
       "kind": "item",
       "file": "world/library/natal/pilar_lanterna_2.png",
       "img_pos": [
-        1354.1,
-        1080.2
+        1368.8,
+        678.8
       ],
       "scale": 0.921,
       "name": "pilar_lanterna_2"
@@ -78,8 +78,8 @@
       "kind": "item",
       "file": "world/library/natal/presentes.png",
       "img_pos": [
-        1074.1,
-        1095.0
+        1314.7,
+        658.0
       ],
       "scale": 1.824,
       "name": "presentes"
@@ -88,8 +88,8 @@
       "kind": "item",
       "file": "world/library/natal/presentes.png",
       "img_pos": [
-        1398.6,
-        1104.3
+        1192.4,
+        663.7
       ],
       "scale": 2.011,
       "name": "presentes"
@@ -183,8 +183,8 @@
       "kind": "snowman",
       "file": "world/library/natal/boneco_neve_knight.png",
       "img_pos": [
-        615.2,
-        749.9
+        1042.3,
+        795.3
       ],
       "scale": 1.329,
       "name": "boneco_neve_knight"
@@ -193,19 +193,20 @@
       "kind": "snowman",
       "file": "world/library/natal/boneco_neve_hornet.png",
       "img_pos": [
-        1342.1,
-        767.2
+        1453.7,
+        815.1
       ],
       "scale": 1.395,
       "name": "boneco_neve_hornet",
-      "solid": true
+      "solid": true,
+      "flip": true
     },
     {
       "kind": "campfire",
       "file": "world/library/natal/fogueira.png",
       "img_pos": [
-        1225.0,
-        1230.0
+        1256.9,
+        870.4
       ],
       "scale": 0.85,
       "name": "fogueira"
@@ -214,11 +215,22 @@
       "kind": "grub_natal",
       "file": "world/library/natal/grub_natal.png",
       "img_pos": [
-        980.0,
-        1180.0
+        791.0,
+        960.3
       ],
-      "scale": 0.85,
+      "scale": 1.196,
       "name": "grub_natal"
+    },
+    {
+      "kind": "grub_natal",
+      "file": "world/library/natal/grub_natal.png",
+      "img_pos": [
+        1548.4,
+        1033.8
+      ],
+      "scale": 1.385,
+      "name": "grub_natal",
+      "flip": true
     }
   ]
 }

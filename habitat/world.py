@@ -89,6 +89,7 @@ class World:
         self.season = current_season(season)
         spec = AREAS[area]
         self.spec = {**spec, **spec.get("seasons", {}).get(self.season, {})}
+        self.indoor = bool(self.spec.get("indoor", False))
         self.folder = SPRITES_DIR / self.spec["folder"]
         self.frozen = self.season == "natal" and (self.folder / "walkable_frozen.png").exists()
         self.background = self._sky()
@@ -106,7 +107,14 @@ class World:
         self.spawn = self.to_screen(self.spec.get("spawn", (0, 0)))
         self.spawns = {k: self.to_screen(v) for k, v in self.spec.get("spawns", {}).items()}
         # saídas para outras áreas: [{"to", "at": (x, y), "arrive": (x, y) em px da imagem de lá}]
-        self.exits = [dict(e, at=self.to_screen(e["at"])) for e in self.spec.get("exits", [])]
+        self.exits = [
+            dict(
+                e,
+                at=self.to_screen(e["at"]),
+                **({"return_pos": self.to_screen(e["return_at"])} if "return_at" in e else {}),
+            )
+            for e in self.spec.get("exits", [])
+        ]
         # luzes (pisca-pisca, porta, lanternas...) e brilho no gelo (lighting.py)
         self.lights = SceneLights(self, self.spec.get("lighting", {}))
         # fadinhas voando em grupinhos (fairies.py)
@@ -139,9 +147,11 @@ class World:
     # ---------- montagem ----------
     def _sky(self) -> pygame.Surface:
         s = pygame.Surface((self.width, self.height))
+        top = (14, 16, 26) if self.indoor else SKY_TOP
+        bot = (24, 26, 38) if self.indoor else SKY_BOTTOM
         for y in range(self.height):
             t = y / (self.height - 1)
-            s.fill([round(a + (b - a) * t) for a, b in zip(SKY_TOP, SKY_BOTTOM)], (0, y, self.width, 1))
+            s.fill([round(a + (b - a) * t) for a, b in zip(top, bot)], (0, y, self.width, 1))
         return s
 
     def _load_ground(self, margin):
@@ -301,6 +311,8 @@ class World:
         # saídas e destinos caem em ponto andável e alcançável (a grade de navegação)
         for e in self.exits:
             e["at"] = self.nav_point(e["at"])
+            if "return_pos" in e:
+                e["return_pos"] = self.nav_point(e["return_pos"])
         self.jumps = [(self.nav_point(a), self.nav_point(b)) for a, b in self.jumps]
 
     def nav_point(self, p):
@@ -467,6 +479,10 @@ class World:
     @property
     def benches(self):
         return [p for p in self.props if p.kind == "bench"]
+
+    @property
+    def beds(self):
+        return [p for p in self.props if p.kind == "bed"]
 
     @property
     def caves(self):

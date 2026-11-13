@@ -73,11 +73,13 @@ class Prop:
         self.defn = defn
         self.time = 0.0
         self.scale = defn.get("scale", 1)
+        self.flip = bool(defn.get("flip", False))
         # "base_offset": px da arte original entre a borda de baixo e o ponto que toca o chão
         self.base_offset = defn.get("base_offset", 0) * self.scale
         art = load_prop_frames(self.kind, self.scale, defn.get("file"))
         self.has_art = art is not None          # False = usando o provisório
-        self.frames = art or self.placeholder_frames()
+        frames = art or self.placeholder_frames()
+        self.frames = [pygame.transform.flip(f, True, False) for f in frames] if self.flip else frames
 
     # --- arte provisória (cada tipo sobrescreve) ---
     def placeholder_frames(self) -> list[pygame.Surface]:
@@ -265,7 +267,8 @@ class Campfire(Prop):
             f = folder / f"{name}.png"
             if not f.exists():
                 return None
-            return pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            surf = pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            return pygame.transform.flip(surf, True, False) if self.flip else surf
 
         self.unlit_snow = ld("unlit_snow")
         self.extinguished = ld("extinguished")
@@ -603,7 +606,9 @@ class Bench(Prop):
         if "seats_rel" in defn:
             self.seats = [f * img.get_width() for f in defn["seats_rel"]]
         else:
-            self.seats = defn.get("seats", [-32, 32])
+            self.seats = list(defn.get("seats", [-32, 32]))
+        if self.flip:
+            self.seats = [-s for s in self.seats]
         self.occupied = {}  # índice do assento -> personagem
         self.seat_height = defn.get("seat_height", 0.42) * img.get_height()
         if "approach_rel" in defn:
@@ -623,6 +628,43 @@ class Bench(Prop):
     def approach(self, i):
         """Onde parar antes de sentar (na frente do assento, fora da área sólida)."""
         return self.x + self.seats[i], self.y + self.defn.get("approach_dy", 34)
+
+
+class Bed(Prop):
+    """Cama para dormir dentro da casa (arte: world/library/casa/cama_*.png).
+
+    Quem deita fica logo à frente da base da cama (`y + 3`, para ser desenhado por cima
+    do colchão), levantado `bed_height` px (`seat_lift`)."""
+    kind = "bed"
+    footprint = (140, 14)
+
+    def __init__(self, x, y, defn):
+        super().__init__(x, y, defn)
+        img = self.frames[0]
+        self.occupant = None
+        self.bed_height = defn.get("bed_height", 0.48) * img.get_height()
+        dx_rel = defn.get("pillow_dx_rel", -0.08)
+        if self.flip:
+            dx_rel = -dx_rel
+        self.pillow_dx = dx_rel * img.get_width()
+        if "approach_rel" in defn:
+            self.defn = dict(self.defn, approach_dy=round(defn["approach_rel"] * img.get_height()))
+        if "footprint" not in defn:
+            self.defn = dict(self.defn, footprint=(round(img.get_width() * 0.70), 14))
+
+    def is_free(self, who=None) -> bool:
+        return self.occupant in (None, who)
+
+    def sleep_pos(self) -> tuple[float, float]:
+        return self.x + self.pillow_dx, self.y + 3
+
+    def sleep_facing(self) -> str:
+        """Lado para onde o personagem olha ao deitar (cabeça no travesseiro)."""
+        return "right" if self.flip else "left"
+
+    def approach(self) -> tuple[float, float]:
+        """Onde parar antes de subir na cama (na frente da cama, fora da área sólida)."""
+        return self.x, self.y + self.defn.get("approach_dy", 30)
 
 
 PLANT_NAMES = ("arbusto", "capim", "planta", "folhas")   # itens da biblioteca que balançam
@@ -680,12 +722,14 @@ class Item(Prop):
             bulbs = db.get("bulbs", {}).get(path.stem, [])
             if pts or bulbs:
                 orig = pygame.image.load(str(path))
+                orig_w = orig.get_width()
                 img = self.frames[0]
-                k = img.get_width() / orig.get_width()
+                k = img.get_width() / orig_w
                 left = self.x - img.get_width() / 2
                 top = self.y + self.base_offset - img.get_height()
-                self.lamps = [(left + lx * k, top + ly * k) for lx, ly in pts]
-                self.bulbs = [(left + bx * k, top + by * k, random.uniform(0, 6.3), random.uniform(1.2, 2.6))
+                self.lamps = [(left + ((orig_w - lx) if self.flip else lx) * k, top + ly * k) for lx, ly in pts]
+                self.bulbs = [(left + ((orig_w - bx) if self.flip else bx) * k, top + by * k,
+                               random.uniform(0, 6.3), random.uniform(1.2, 2.6))
                               for bx, by in bulbs]
                 self.lamp_k = k
         self.bulbs = getattr(self, "bulbs", [])
@@ -694,7 +738,7 @@ class Item(Prop):
         name = defn.get("name") or (str(f).rsplit("/", 1)[-1].rsplit(".", 1)[0] if f else "")
         self.breeze = None
         if name.startswith(PLANT_NAMES) and not self.lamps and not self.bulbs:
-            self.breeze = Breeze(self.frames[0], ("item", f, round(self.scale, 3)))
+            self.breeze = Breeze(self.frames[0], ("item", f, round(self.scale, 3), self.flip))
 
     def image(self):
         if self.breeze:
@@ -778,7 +822,8 @@ class Lamp(Prop):
 
     def __init__(self, x, y, defn):
         super().__init__(x, y, defn)
-        self.lights = [(dx * self.scale, dy * self.scale) for dx, dy in defn.get("lights", [])]
+        sign = -1 if self.flip else 1
+        self.lights = [(sign * dx * self.scale, dy * self.scale) for dx, dy in defn.get("lights", [])]
         self.glow = radial_glow(round(110 * max(0.6, self.scale)), (170, 150, 110))
         # poça de luz no chão: gradiente radial achatado (luz aditiva não usa alpha)
         pool = radial_glow(120, (95, 85, 55))
@@ -792,7 +837,7 @@ class Lamp(Prop):
         flick = 0.94 + 0.06 * math.sin(self.time * 9.0)
         for dx, dy in self.lights:
             add_light(surface, self.glow, (round(self.x + dx), round(self.y + dy)), on * flick)
-        add_light(surface, self.pool, (round(self.x - 40), round(self.y + 30)), on)
+        add_light(surface, self.pool, (round(self.x + (40 if self.flip else -40)), round(self.y + 30)), on)
 
 
 class FruitTree(Prop):
@@ -825,8 +870,8 @@ class FruitTree(Prop):
             for pose in ("full", "empty") + self.HIT_POSES:
                 f = folder / f"{pose}.png"
                 if f.exists():
-                    self.poses[pose] = pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(),
-                                                                       self.scale)
+                    surf = pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale)
+                    self.poses[pose] = pygame.transform.flip(surf, True, False) if self.flip else surf
         else:                                          # imagem única: inclinações pré-calculadas
             from .decor import sway_poses
             img = self.frames[0]
@@ -857,7 +902,7 @@ class FruitTree(Prop):
         """Pose parada balançando de leve com a brisa (props.Breeze, uma por pose)."""
         b = self._breezes.get(name)
         if b is None:
-            b = self._breezes[name] = Breeze(img, ("tree", str(self.defn.get("file")), name, round(self.scale, 3)))
+            b = self._breezes[name] = Breeze(img, ("tree", str(self.defn.get("file")), name, round(self.scale, 3), self.flip))
             b.phase, b.freq = self._breeze_phase, self._breeze_freq    # trocar de pose não dá pulo
         return b.image(self.time, self.world)
 
@@ -1046,7 +1091,8 @@ class ZoteDummy(Prop):
             f = folder / f"{name}.png"
             if not f.exists():
                 return None
-            return pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            surf = pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            return pygame.transform.flip(surf, True, False) if self.flip else surf
 
         self.idle = [img for img in (ld(f"idle_{i}") for i in range(4)) if img]
         self.hits = [img for img in (ld(f"hit_{i}") for i in range(5)) if img]
@@ -1265,7 +1311,8 @@ class Snowman(Prop):
             f = folder / f"{name}.png"
             if not f.exists():
                 return None
-            return pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            surf = pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            return pygame.transform.flip(surf, True, False) if self.flip else surf
 
         self.builds = [img for img in (ld(f"build_{i}") for i in range(3)) if img]
         self.idle = [img for img in (ld(f"idle_{i}") for i in range(3)) if img]
@@ -1465,7 +1512,8 @@ class GrubNatal(Prop):
             f = folder / f"{name}.png"
             if not f.exists():
                 return None
-            return pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            surf = pygame.transform.smoothscale_by(pygame.image.load(str(f)).convert_alpha(), self.scale * k)
+            return pygame.transform.flip(surf, True, False) if self.flip else surf
 
         self.jar_frames = [img for img in (ld(f"jar_{i}") for i in range(6)) if img]
         self.hit_frames = [img for img in (ld(f"hit_{i}") for i in range(3)) if img]
@@ -1690,7 +1738,7 @@ class GrubNatal(Prop):
             pygame.draw.circle(surface, (240, 246, 255), (round(sx), round(sy)), r)
 
 
-KINDS = {cls.kind: cls for cls in (House, Tree, Campfire, Dummy, Bench, Lamp, Cave, Item, FruitTree, ZoteDummy, Snowman, GrubNatal)}
+KINDS = {cls.kind: cls for cls in (House, Tree, Campfire, Dummy, Bench, Bed, Lamp, Cave, Item, FruitTree, ZoteDummy, Snowman, GrubNatal)}
 
 
 # itens da biblioteca que são árvores de frutas (dá para bater e derrubar fruta)
@@ -1710,4 +1758,6 @@ def make_prop(defn: dict) -> Prop:
         kind = "campfire"                            # fogueira interativa
     if kind == "item" and str(defn.get("name", "")).lower().startswith(("grub_natal", "group-natal", "group_natal")):
         kind = "grub_natal"                          # Grub de Natal no pote
+    if kind == "item" and str(defn.get("name", "")).lower().startswith("cama"):
+        kind = "bed"                                 # cama para dormir
     return KINDS[kind](x, y, defn)

@@ -26,6 +26,8 @@ def find_action(game, ch):
     w, b = game.worlds[ch.area], ch.brain
     if ch.seated_on:
         return "Levantar", "stand", None
+    if ch.sleeping_in:
+        return "Levantar da cama", "wake_bed", None
     if ch.swimming:
         spot = _nearest(b._swim_spots(), (ch.x, ch.y), key=lambda s: s[3], limit=REACH + 20)
         if spot:
@@ -68,10 +70,17 @@ def find_action(game, ch):
                 return "Brincar com o Grub", "grub de natal", lambda gn=gn: b.t_play_grub_natal(gn, walk=False)
             if gn.state == "snow":
                 return "Chamar o Grub", "grub de natal", lambda gn=gn: b.t_play_grub_natal(gn, walk=False)
+    for bed in getattr(w, "beds", []):
+        if bed.is_free(ch) and math.dist(bed.approach(), (ch.x, ch.y)) < REACH + 18:
+            return "Dormir na cama", "dormir", lambda bed=bed: b.t_sleep_in_bed(bed, walk=True)
     for bench in getattr(w, "benches", []):
         i = bench.free_seat(ch)
         if i is not None and math.dist(bench.approach(i), (ch.x, ch.y)) < REACH + 10:
             return "Sentar", "banco", lambda: b.t_sit_here(bench, i)
+    for ex in getattr(w, "exits", []):
+        if math.dist(ex["at"], (ch.x, ch.y)) < REACH + 18:
+            label = ex.get("label") or ("Entrar na casa" if ex["to"] == "casa" else "Sair da casa")
+            return label, "viajar", lambda to=ex["to"]: b.go_area(to)
     for jump in getattr(w, "jumps", []):
         if min(math.dist(p, (ch.x, ch.y)) for p in jump) < REACH:
             return "Pular", "pular a cachoeira", lambda: b.t_leap_falls(jump, start_near=True)
@@ -100,6 +109,11 @@ def do_action(game, ch):
     b = ch.brain
     if name == "stand":
         b.stand_request = True                  # a tarefa de sentar levanta sozinha
+        b.manual = 0
+        return True
+    if name == "wake_bed":
+        ch.toggle_sleep()
+        b.leave_bed()
         b.manual = 0
         return True
     if make is None:

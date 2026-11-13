@@ -27,7 +27,9 @@ AREAS = {
         ],
         "spawn": (465, 392),
         "spawns": {"daughter": (600, 380), "hornet": (612, 429), "grub": (367, 465), "hollow": (540, 415)},
-        "exits": [],
+        "exits": [
+            {"to": "casa", "at": (456, 148), "return_at": (472, 172), "arrive": (740, 445), "label": "Entrar na casa"},
+        ],
         "fairies": {"swarms": 3, "size": (3, 6), "scale": 0.3},   # fadinhas (fairies.py)
         # plantas pintadas no chão balançando de leve (effects.PlantSway): (x0, y0, x1, y1), y1 = base
         "effects": [
@@ -57,6 +59,9 @@ AREAS = {
                 ],
                 "spawn": (1167, 867),
                 "spawns": {"daughter": (1417, 933), "hornet": (1300, 1000), "grub": (900, 1000), "hollow": (1060, 960)},
+                "exits": [
+                    {"to": "casa", "at": (640, 438), "return_at": (690, 470), "arrive": (740, 445), "label": "Entrar na casa"},
+                ],
                 # pulos: os personagens pulam de um ponto para o outro (por cima da cachoeira)
                 "jumps": [((1975, 292), (2308, 375))],
                 # luzes (lighting.py), em px da imagem: luz quente + fios de pisca-pisca do desenho
@@ -111,6 +116,28 @@ AREAS = {
                     ]},
                 ],
             },
+        },
+    },
+    "casa": {
+        "folder": "world/areas/casa",
+        "indoor": True,
+        "props": [
+            {"kind": "bed", "img_pos": (510, 405), "file": "world/library/casa/cama_azul.png",
+             "scale": 0.54, "name": "cama_azul", "approach_rel": 0.20},
+            {"kind": "bed", "img_pos": (290, 560), "file": "world/library/casa/cama_vermelha.png",
+             "scale": 0.54, "name": "cama_vermelha", "approach_rel": 0.20},
+        ],
+        "spawn": (535, 515),
+        "spawns": {"daughter": (605, 535), "hornet": (620, 500), "grub": (450, 540), "hollow": (480, 490)},
+        "exits": [
+            {"to": "lago", "at": (815, 412), "return_at": (740, 445), "arrive": "door", "label": "Sair da casa"},
+        ],
+        "lighting": {
+            "warm": [
+                {"pos": (290, 345), "radius": 150, "color": (255, 145, 65), "flicker": 0.14},
+                {"pos": (716, 195), "radius": 115, "color": (255, 180, 90), "flicker": 0.08},
+                {"pos": (428, 175), "radius": 85, "color": (165, 195, 235), "flicker": 0.03},
+            ],
         },
     },
 }

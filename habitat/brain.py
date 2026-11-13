@@ -273,23 +273,24 @@ class Brain:
         night = self.env.phase == "Noite"
         if self.energy < SLEEP_THRESHOLD or (night and self.energy < NIGHT_SLEEP_THRESHOLD):
             return "dormir", self.t_sleep(night)
-        if self.env.rain > 0.3 and self.find_cave() and self.rng.random() < 0.7:
+        if self.env.rain > 0.3 and not getattr(self.world, "indoor", False) and ("casa" in self.worlds or self.find_cave()) and self.rng.random() < 0.7:
             return "abrigo", self.t_shelter()
         if self.thirst > NEED_THRESHOLD and self.world.shore:
             return "beber", self.t_drink()
         if self.hunger > NEED_THRESHOLD and self._can_eat():
             return "comer", self.t_eat()
+        indoor = getattr(self.world, "indoor", False)
         options = [
             ("passear", self.t_wander, 40 + 30 * self.boredom),
             ("parado", self.t_idle, 25),
             ("treinar", self.t_train, 6 + 10 * self.boredom),
             ("pular", self.t_jump, 4 + 6 * self.boredom),
-            ("olhar o céu", self.t_look_up, 6 + (8 if night else 0)),
+            ("olhar o céu", self.t_look_up, 0 if indoor else (6 + (8 if night else 0))),
             ("ver o lago", self.t_visit_pond, 3 if self.world.shore else 0),
             ("banco", self.t_bench, self.bench_weight()),
-            ("sentir o vento", self.t_wind, self.wind_weight()),
+            ("sentir o vento", self.t_wind, 0 if indoor else self.wind_weight()),
             ("nadar", self.t_swim, self.swim_weight()),
-            ("outra ilha", self.t_go_other, 2 if len(self.worlds) > 1 else 0),
+            ("outra ilha", self.t_go_other, 28 if (indoor and self.env.rain <= 0.3) else (3 if len(self.worlds) > 1 else 0)),
             ("patinar", self.t_skate, 6 if getattr(self.world, "frozen", False) else 0),
             ("pular a cachoeira", self.t_leap_falls, 5 if getattr(self.world, "jumps", None) else 0),
             ("boneco de neve", self.t_snowman, self.snowman_weight()),
@@ -414,6 +415,60 @@ class Brain:
         self.c.x, self.c.y = bench.approach(i)
         if self.c.state in SEATED:
             self.c.state = "idle"
+
+    # ---------- cama ----------
+    def find_bed(self):
+        """(área, cama) de uma cama livre (prefere a área atual, depois 'casa')."""
+        order = [self.c.area] + [n for n in ("casa", *self.worlds) if n != self.c.area and n in self.worlds]
+        seen = set()
+        for n in order:
+            if n in seen:
+                continue
+            seen.add(n)
+            w = self.worlds.get(n)
+            if w is None:
+                continue
+            free = [b for b in getattr(w, "beds", []) if b.is_free(self.c)]
+            if free:
+                return n, free[0]
+        return None
+
+    def sleep_on_bed(self, bed):
+        bed.occupant = self.c
+        self.c.x, self.c.y = bed.sleep_pos()
+        self.c.sleeping_in = bed
+        self.c.seat_lift = bed.bed_height - self.c.seat_drop
+        self.face(bed.sleep_facing())
+
+    def leave_bed(self):
+        if not self.c.sleeping_in:
+            return
+        bed = self.c.sleeping_in
+        if bed.occupant is self.c:
+            bed.occupant = None
+        self.c.sleeping_in = None
+        self.c.seat_lift = 0.0
+        self.c.x, self.c.y = self.world.nav_point(bed.approach())
+
+    def t_sleep_in_bed(self, bed, walk=True, night=None):
+        """Vai até a cama `bed`, sobe no colchão e dorme."""
+        if not bed.is_free(self.c):
+            return
+        bed.occupant = self.c
+        try:
+            if walk:
+                app = self.world.nav_point(bed.approach())
+                yield from self.walk_to(app)
+                if math.hypot(app[0] - self.c.x, app[1] - self.c.y) > 36:
+                    return
+            self.sleep_on_bed(bed)
+            if night is None:
+                night = self.env.phase == "Noite"
+            yield from self._sleep_here(night)
+        finally:
+            if bed.occupant is self.c and self.c.sleeping_in is not bed:
+                bed.occupant = None
+            self.leave_bed()
 
     def bench_weight(self):
         if not self.world.benches or "bench_sit" not in self.c.sheets:
@@ -584,11 +639,20 @@ class Brain:
             return
         old = self.world
         self.leave_bench()
+        self.leave_bed()
         self._leave_cave_now()
         self.c.swimming = False
         new = self.worlds[name]
         ex = old.exit_to(name)
-        x, y = new.to_screen(ex["arrive"]) if ex else new.spawn
+        back = new.exit_to(old.name)
+        if ex and ex.get("arrive") == "door" and back:
+            x, y = back.get("return_pos", back["at"])
+        elif ex and isinstance(ex.get("arrive"), (tuple, list)):
+            x, y = new.to_screen(ex["arrive"])
+        elif back and "return_pos" in back:
+            x, y = back["return_pos"]
+        else:
+            x, y = new.spawn
         self.c.x, self.c.y = new.nav_point((x, y))
         self.c.area = name
         self.c.world = new
@@ -690,8 +754,24 @@ class Brain:
         self.c.in_cave = False
 
     def t_shelter(self):
-        """Chuva: corre para a caverna e espera passar lá dentro."""
+        """Chuva: corre para dentro da casa (ou caverna) e espera passar lá dentro."""
         self.say("shelter", 0.8)
+        if "casa" in self.worlds and self.c.area != "casa":
+            ok = yield from self.go_area("casa")
+            if ok:
+                yield from self.walk_to(self.free_point(160))
+                t, next_line = 0.0, self.rng.uniform(15, 30)
+                while self.env.rain > 0.3 and t < 240 and self.c.area == "casa":
+                    next_line -= self.dt
+                    if next_line <= 0:
+                        next_line = self.rng.uniform(20, 40)
+                        self.say("sheltered", 0.5)
+                    yield
+                    t += self.dt
+                if self.env.rain <= 0.3 and self.c.area == "casa":
+                    self.say("rain_over", 0.7)
+                    yield from self.go_area("lago")
+                return
         found = self.find_cave()
         if not found:
             return
@@ -1373,7 +1453,26 @@ class Brain:
 
     def t_sleep(self, night):
         self.say("sleepy")
-        yield from self.wait(2.0)
+        yield from self.wait(1.5)
+        found_bed = self.find_bed() if self.c.locomotion != "burrow" else None
+        if found_bed:
+            area, bed = found_bed
+            bed.occupant = self.c          # reserva a cama enquanto vai até a casa
+            try:
+                if self.c.area != area:
+                    self.say("cave_sleep", 0.6)
+                    ok = yield from self.go_area(area)
+                    if not ok:
+                        return
+                yield from self.t_sleep_in_bed(bed, walk=True, night=night)
+                if self.c.area == "casa" and self.env.phase in ("Amanhecer", "Dia") and self.env.rain <= 0.3:
+                    yield from self.wait(1.0)
+                    yield from self.go_area("lago")
+                return
+            finally:
+                if bed.occupant is self.c and self.c.sleeping_in is not bed:
+                    bed.occupant = None
+                self.leave_bed()
         cave = self.find_cave() if night and self.c.locomotion != "burrow" else None
         if cave:                             # à noite dorme na caverna
             self.say("cave_sleep", 0.6)
@@ -1650,21 +1749,25 @@ class DaughterBrain(Brain):
         night = self.env.phase == "Noite"
         if self.energy < SLEEP_THRESHOLD or (night and self.energy < NIGHT_SLEEP_THRESHOLD):
             return "dormir", self.t_sleep(night)
+        if self.env.rain > 0.3 and not getattr(self.world, "indoor", False) and "casa" in self.worlds and self.rng.random() < 0.7:
+            return "abrigo", self.t_shelter()
         if self.thirst > NEED_THRESHOLD and self.world.shore:
             return "beber", self.t_drink()
         if self.hunger > NEED_THRESHOLD and self._can_eat():
             return "comer", self.t_eat()
+        indoor = getattr(self.world, "indoor", False)
         knight = next((o for o in self.others if o.area == self.c.area and o.name == "Knight"), None)
         options = [
             ("passear", self.t_wander, 28 + 15 * self.boredom),
             ("parado", self.t_idle, 16),
             ("colher flores", self.t_flowers, 12 if self._food() else 0),
             ("lembrar", self.t_remember, 10),
-            ("olhar o céu", self.t_look_up, 10 + (10 if night else 0)),
+            ("olhar o céu", self.t_look_up, 0 if indoor else (10 + (10 if night else 0))),
             ("ver o lago", self.t_visit_pond, 10 if self.world.shore else 0),
             ("banco", self.t_bench, self.bench_weight() * 2),
-            ("sentir o vento", self.t_wind, self.wind_weight() * 2),
+            ("sentir o vento", self.t_wind, 0 if indoor else self.wind_weight() * 2),
             ("nadar", self.t_swim, self.swim_weight()),
+            ("outra ilha", self.t_go_other, 28 if (indoor and self.env.rain <= 0.3) else (3 if len(self.worlds) > 1 else 0)),
             ("dançar", self.t_dance, 3 + 8 * self.boredom),
             ("observar", self.t_watch, 8 if knight is not None else 0),
             ("treinar", self.t_train, 2),
@@ -1916,8 +2019,9 @@ class HollowBrain(Brain):
         if self.env.rain > 0.3 and self.find_cave() and self.rng.random() < 0.65:
             return "abrigo", self.t_shelter()
         options = [
-            ("passear", self.t_wander, 42 + 25 * self.boredom),
-            ("parado", self.t_idle, 20),
+            ("passear", self.t_wander, 40 + 25 * self.boredom),
+            ("parado", self.t_idle, 18),
+            ("sentar", self.t_sit_ground, 12),
             ("vigiar", self.t_guard, 14 if self.others else 0),
             ("olhar o céu", self.t_look_up, 8 + (8 if night else 0)),
             ("ver o lago", self.t_visit_pond, 6 if self.world.shore else 0),
@@ -1948,4 +2052,16 @@ class HollowBrain(Brain):
             self.face("right" if target_char.x > self.c.x else "left")
             yield
             t += self.dt
+        self.boredom = max(0.0, self.boredom - 0.25)
+
+    def t_sit_ground(self):
+        """Senta no chão para descansar e contemplar em silêncio, depois se levanta."""
+        self.say("bench", 0.5)
+        self.c.do_action("sit_down")
+        yield
+        while self.c.state == "sit_down":
+            yield
+        self.c.state = "bench_sit"
+        yield from self.wait(self.rng.uniform(10, 22))
+        yield from self.play("stand_up")
         self.boredom = max(0.0, self.boredom - 0.25)

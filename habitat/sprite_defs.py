@@ -186,8 +186,8 @@ CHARACTER_SPRITES = {
         },
     },
     "hollow": {
-        # Quadros recortados de assets/sprites/character/hollow/walk.png por tools/make_hollow.py
-        # (tela uniforme de 120x186, alinhados pelo eixo da cabeça e pés na base).
+        # Quadros recortados de assets/sprites/character/hollow/{walk,sentado}.png por tools/make_hollow.py
+        # (tela uniforme de 200x200, alinhados pelo eixo da cabeça e pés na base).
         "frames_root": "character/hollow/frames",
         "scale": 0.85,
         "art_faces": "right",
@@ -195,23 +195,30 @@ CHARACTER_SPRITES = {
         "shadow": (44, 10),
         "seat_drop": 20,
         "animations": {
-            "idle":         {"dir": "idle", "pick": [0, 1], "frame_duration": 0.55, "art_faces": None},
-            "walk":         {"dir": "walk", "pick": [0, 1, 2, 1], "frame_duration": 0.11},
-            "walk_down":    {"dir": "walk_down", "pick": [1, 2, 3, 0], "frame_duration": 0.11, "art_faces": None},
+            "idle":         {"dir": "idle", "pick": [0, 1], "frame_duration": 0.65},
+            "walk":         {"dir": "walk", "frame_duration": 0.10},
+            "walk_down":    {"dir": "walk_down", "frame_duration": 0.10, "art_faces": None},
             "walk_up":      {"dir": "walk_up", "frame_duration": 0.10, "art_faces": None},
-            "walk_up_side": {"dir": "walk_up_side", "pick": [0, 1, 2, 1], "frame_duration": 0.11},
-            # ações derivadas enquanto a pasta tem apenas walk.png
-            "jump":         {"dir": "walk", "pick": [1, 0, 2, 0], "frame_duration": 0.08,
+            "walk_up_side": {"dir": "walk_up_side", "frame_duration": 0.11},
+            # sentar (no banco ou no chão) e levantar
+            "sit_down":     {"dir": "sit_down", "frame_duration": 0.08, "loop": False, "next": "bench_sit"},
+            "bench_sit":    {"dir": "sit", "pick": [0, 1, 0, 1, 2, 3, 1, 0], "frame_duration": 0.45},
+            "bench_leave":  {"dir": "stand_up", "frame_duration": 0.08, "loop": False},
+            "stand_up":     {"dir": "stand_up", "frame_duration": 0.08, "loop": False},
+            # deitar, dormir e acordar
+            "lie_down":     {"dir": "lie_down", "frame_duration": 0.09, "loop": False, "next": "sleep"},
+            "sleep":        {"dir": "sleep", "pick": [0, 1, 2, 3, 2, 1], "frame_duration": 0.45},
+            "wake":         {"dir": "wake", "frame_duration": 0.09, "loop": False},
+            # ações complementares
+            "jump":         {"dir": "walk", "pick": [1, 2, 3, 4, 0], "frame_duration": 0.08,
                              "loop": False, "hop": 75},
-            "bench_sit":    {"dir": "idle", "pick": [0], "frame_duration": 1.0, "art_faces": None},
-            "sleep":        {"dir": "idle", "pick": [0], "frame_duration": 0.8, "art_faces": None},
-            "eat":          {"dir": "walk_down", "pick": [1, 2, 1, 0], "frame_duration": 0.1,
-                             "loop": False, "art_faces": None},
-            "attack":       {"dir": "walk", "pick": [0, 1, 2, 1, 0], "frame_duration": 0.07,
-                             "loop": False, "hit_frame": 1},
-            "look_up":      {"dir": "walk_up", "pick": [0, 1], "frame_duration": 0.15,
+            "eat":          {"dir": "sit_down", "pick": [0, 1, 2, 3, 2, 1, 0], "frame_duration": 0.08,
+                             "loop": False},
+            "attack":       {"dir": "walk_profile", "pick": [0, 1, 2, 3, 0], "frame_duration": 0.07,
+                             "loop": False, "hit_frame": 2},
+            "look_up":      {"dir": "walk_up", "pick": [0, 4], "frame_duration": 0.22,
                              "loop": False, "next": "hold", "art_faces": None},
-            "look_down":    {"dir": "idle", "pick": [0], "frame_duration": 0.15,
+            "look_down":    {"dir": "walk_down", "pick": [0, 4], "frame_duration": 0.22,
                              "loop": False, "next": "hold", "art_faces": None},
         },
     },

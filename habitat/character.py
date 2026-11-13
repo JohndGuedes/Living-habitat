@@ -47,7 +47,8 @@ class Character:
         self.brain = None          # a rotina, se houver (ligada pelo Game)
         self.seat_drop = sprite_def.get("seat_drop", 0) * CHARACTER_SCALE
         self.seated_on = None      # (banco, assento) quando sentado
-        self.seat_lift = 0.0       # altura extra do desenho (sentado no banco)
+        self.sleeping_in = None    # cama (props.Bed) quando deitado na cama
+        self.seat_lift = 0.0       # altura extra do desenho (sentado no banco / deitado na cama)
         self.animator = Animator()
         self.hit_now = False
         self.speech = None         # [texto, segundos restantes, duração total]
@@ -143,6 +144,8 @@ class Character:
                     self.y = ny
             length = 0.0                     # (pula a parte de "andar" abaixo)
         if length > 0.01:  # andar cancela qualquer ação
+            if self.sleeping_in is not None and self.brain is not None:
+                self.brain.leave_bed()
             x, y = x / length, y / length  # diagonal não fica mais rápida
             run = self.running and "run" in self.sheets
             # vetor menor que 1 = passo mais curto (a rotina freia ao chegar no ponto)
@@ -196,7 +199,7 @@ class Character:
 
     def draw(self, surface: pygame.Surface, viewer=None, tint: float = 1.0):
         """`tint` < 1 escurece (ex.: debaixo da árvore)."""
-        if not self.swimming:
+        if not self.swimming and self.sleeping_in is None:
             surface.blit(self._shadow, self._shadow.get_rect(center=(round(self.x), round(self.y))))
         cur = self.current_frame()
         if cur:

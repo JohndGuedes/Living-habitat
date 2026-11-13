@@ -21,7 +21,11 @@ def load_image(path: Path) -> pygame.Surface | None:
     if not path.exists():
         log.warning("não encontrado: %s", _shown(path))
         return None
-    return pygame.image.load(path).convert_alpha()
+    try:
+        return pygame.image.load(path).convert_alpha()
+    except (pygame.error, OSError) as exc:
+        log.warning("falha ao carregar imagem %s: %s", _shown(path), exc)
+        return None
 
 
 def _common_opts(definition: dict, anim: dict) -> dict:
@@ -243,14 +247,13 @@ def load_prop_frames(kind: str, scale: float = 1, file: str | None = None) -> li
     None = não tem arte (o objeto usa o desenho provisório)."""
     if file:
         path = SPRITES_DIR / file
-        if not path.exists():
-            log.warning("não encontrado: %s", _shown(path))
-            return None
-        return [_scale(pygame.image.load(path).convert_alpha(), scale)]
+        img = load_image(path)
+        return [_scale(img, scale)] if img is not None else None
     folder = SPRITES_DIR / "world" / kind
     files = sorted(folder.glob("*.png")) if folder.is_dir() else []
     if not files and (SPRITES_DIR / "world" / f"{kind}.png").exists():
         files = [SPRITES_DIR / "world" / f"{kind}.png"]
     if not files:
         return None
-    return [_scale(pygame.image.load(f).convert_alpha(), scale) for f in files]
+    loaded = [img for f in files if (img := load_image(f)) is not None]
+    return [_scale(img, scale) for img in loaded] if loaded else None

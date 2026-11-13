@@ -112,8 +112,10 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
       (`t_flowers`), lembra de casa (`t_remember`), dança (`t_dance`), observa o Knight de longe
       (`t_watch`), senta mais no banco e quase não treina.
     - `HollowBrain`: falas próprias (`HOLLOW_LINES`, silencioso e solene), sem fome nem sede; caminha
-      pela ilha, vigia os outros moradores (`t_guard`), olha o céu e o lago, descansa no banco e
-      interage com os elementos do cenário.
+      pela ilha, senta para descansar no chão (`t_sit_ground`) ou no banco (`t_bench`), dorme deitando
+      no chão (`lie_down` → `sleep` → `wake`), vigia os outros moradores (`t_guard`), olha o céu e o
+      lago, e interage com os elementos do cenário. Quadros extraídos de `walk.png` e `sentado.png` por
+      `tools/make_hollow.py`.
     - `GrubBrain`: sem fome nem sede; `lonely` sobe quando ninguém está perto (até 160 px), e com
       isso ele chora. Também fica feliz e viaja por `burrow_to`.
   - Comum a todos:
@@ -174,7 +176,15 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
   - Viagem: `Brain.go_area`/`enter_area` usa as saídas (`world.exits`: `at` e `arrive`). A troca de
     área tem um escurecimento (`game.fade`).
   - **lago**: ilha com a casinha, o lago e o banco. O poste saiu por enquanto. É onde todos começam
-    (`START_AREA`).
+    (`START_AREA`). A porta da casinha liga à área **casa** (`"exits"`).
+  - **casa** (`world/areas/casa/`, gerada por `tools/make_casa.py`): interior isométrico da casinha
+    (`"indoor": True`, fundo escuro aconchegante, lareira acesa, lanterna de parede, janela e tapete),
+    com **duas camas** (`props.Bed`: `cama_azul` e `cama_vermelha`, também disponíveis na biblioteca
+    do editor em `world/library/casa/`). À noite ou cansados (`t_sleep`), os moradores vão até a porta
+    da casinha, entram em `casa` e dormem em uma cama livre (`t_sleep_in_bed`, desenhados sobre o
+    colchão via `seat_lift`); na chuva (`t_shelter`), abrigam-se lá dentro até estiar. Perto da porta
+    ou das camas, a tecla **E** mostra `"Entrar na casa"`, `"Sair da casa"`, `"Dormir na cama"` e
+    `"Levantar da cama"`, e **C** também alterna entre a ilha e o interior da casa.
   - **Estações** (`world.current_season`, `config.SEASON`/`NATAL_MONTHS`): `scene.AREAS[área]["seasons"]`
     troca chaves da área numa estação. Em novembro e dezembro, "lago" usa outro mapa inteiro, a área
     **natal** (`world/areas/natal/`, de `ground-natal.jpg`):
@@ -243,6 +253,7 @@ Não há testes automatizados. Para checar sem abrir janela, use `SDL_VIDEODRIVE
     - Arrastar move o objeto; roda ou +/− mudam o tamanho; setas fazem ajuste fino (Shift = 10x).
     - Tab passa para o próximo objeto.
     - Delete remove o objeto selecionado.
+    - **F**, **H** ou **botão direito** invertem horizontalmente o objeto selecionado (`"flip": true` em `layout.json`), espelhando também a posição das luzes/pisca-pisca (`lights.json`), assentos de banco e todas as poses animadas.
     - K alterna sólido/atravessável.
     - Backspace volta o objeto ao valor de `scene.py` (só os que estão lá).
     - Ctrl+S ou Enter salvam; O ou Esc saem.
